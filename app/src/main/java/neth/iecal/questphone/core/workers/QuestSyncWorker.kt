@@ -47,6 +47,12 @@ class QuestSyncWorker(
     }
 
     override suspend fun doWork(): Result {
+        // Local-only build: cloud sync is permanently disabled. The user is always
+        // anonymous, so no Supabase session exists — bail out before any network
+        // call or foreground notification is created.
+        if (userRepository.userInfo.isAnonymous) {
+            return Result.success()
+        }
         setForegroundAsync(createForegroundInfo(context))
         val isFirstTime = inputData.getBoolean(EXTRA_IS_FIRST_TIME, false)
         val specificQuestId = inputData.getString(EXTRA_IS_PULL_SPECIFIC_QUEST)

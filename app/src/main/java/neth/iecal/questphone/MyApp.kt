@@ -1,18 +1,19 @@
 package neth.iecal.questphone
 
 import android.app.Application
-import android.net.ConnectivityManager
-import android.net.Network
 import dagger.hilt.android.HiltAndroidApp
-import neth.iecal.questphone.backed.isOnline
-import neth.iecal.questphone.backed.repositories.UserRepository
-import neth.iecal.questphone.backed.triggerQuestSync
-import neth.iecal.questphone.backed.triggerStatsSync
 import neth.iecal.questphone.core.services.reloadServiceInfo
 import neth.iecal.questphone.core.Supabase
+import neth.iecal.questphone.core.backup.LocalBackupWorker
 import nethical.questphone.core.core.utils.CrashLogger
 import nethical.questphone.core.core.utils.VibrationHelper
-import javax.inject.Inject
+import androidx.work.BackoffPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 
 
 // The Hilt Gradle plugin is applied, so the canonical no-arg form is required —
@@ -21,33 +22,46 @@ import javax.inject.Inject
 @HiltAndroidApp
 class MyApp : Application() {
 
-    private lateinit var connectivityManager: ConnectivityManager
-    private lateinit var networkCallback: ConnectivityManager.NetworkCallback
-    @Inject lateinit var userRepository: UserRepository
-
-
     override fun onCreate() {
         super.onCreate()
         Supabase.initialize(this)
         VibrationHelper.init(this)
         reloadServiceInfo(this)
-        connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
 
-        networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                super.onAvailable(network)
-                // Trigger sync when network becomes available
-                triggerQuestSync(applicationContext)
-                triggerStatsSync(applicationContext)
-            }
-        }
-
-        connectivityManager.registerDefaultNetworkCallback(networkCallback)
-        if (isOnline()) {
-            triggerQuestSync(applicationContext)
-        }
+        scheduleDailyLocalBackup()
 
         Thread.setDefaultUncaughtExceptionHandler(CrashLogger(this))
+    }
+
+    /**
+     * Every day the full local data set (profile, quests, stats, reminders) is
+     * exported to phone storage so nothing is ever lost. A periodic worker runs
+     * ~every 24h; a one-time catch-up job covers the case where the device was
+     * off/rebooted for more than a day since the last backup.
+     */
+    private fun scheduleDailyLocalBackup() {
+        val workManager = WorkManager.getInstance(this)
+
+        val periodic = PeriodicWorkRequestBuilder<LocalBackupWorker>(24, TimeUnit.HOURS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.MINUTES)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            LocalBackupWorker.PERIODIC_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            periodic
+        )
+
+        if (LocalBackupWorker.isBackupDue(this)) {
+            val catchUp = OneTimeWorkRequestBuilder<LocalBackupWorker>()
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.MINUTES)
+                .build()
+            workManager.enqueueUniqueWork(
+                LocalBackupWorker.CATCH_UP_NAME,
+                ExistingWorkPolicy.KEEP,
+                catchUp
+            )
+        }
     }
 
 }

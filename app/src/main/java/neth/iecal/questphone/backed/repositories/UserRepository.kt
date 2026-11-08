@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.UUID
 import neth.iecal.questphone.backed.triggerProfileSync
 import neth.iecal.questphone.core.Supabase
 import nethical.questphone.core.core.utils.getCurrentDate
@@ -47,16 +48,22 @@ class UserRepository @Inject constructor(
     // the below variables act as a trigger for launching the reward dialog declared in the MainActivity from a
     // different SubScreen.
     fun getUserId(): String {
-        return if (userInfo.isAnonymous){
-            ""
-        } else {
-            val sp = context.getSharedPreferences("authtoken", Context.MODE_PRIVATE)
-            var id = sp.getString("key",null)
-            if(id!= null) return id
-            id = Supabase.supabase.auth.currentUserOrNull()?.id ?: return ""
-            sp.edit { putString("key",id) }
-            Supabase.supabase.auth.currentUserOrNull()!!.id
+        // Local-only build: no accounts exist, so a stable local identifier is
+        // generated once and kept on-device instead of a Supabase user id.
+        if (userInfo.isAnonymous) {
+            val sp = context.getSharedPreferences("local_user", Context.MODE_PRIVATE)
+            var id = sp.getString("key", null)
+            if (id != null) return id
+            id = UUID.randomUUID().toString()
+            sp.edit { putString("key", id) }
+            return id
         }
+        val sp = context.getSharedPreferences("authtoken", Context.MODE_PRIVATE)
+        var id = sp.getString("key",null)
+        if(id!= null) return id
+        id = Supabase.supabase.auth.currentUserOrNull()?.id ?: return ""
+        sp.edit { putString("key",id) }
+        return Supabase.supabase.auth.currentUserOrNull()!!.id
     }
 
     fun addXp(xp: Int) {
@@ -234,9 +241,34 @@ class UserRepository @Inject constructor(
     fun loadUserInfo(): UserInfo {
         val sharedPreferences = context.getSharedPreferences("user_info", Context.MODE_PRIVATE)
         val userInfoJson = sharedPreferences.getString("user_info", null)
-        return userInfoJson?.let {
-            json.decodeFromString(it)
+        val info = userInfoJson?.let {
+            try {
+                json.decodeFromString<UserInfo>(it)
+            } catch (e: Exception) {
+                Log.e("UserRepository", "Corrupted user_info cache, starting fresh", e)
+                UserInfo()
+            }
         } ?: UserInfo()
+        // This build is fully offline/local: there is no login or signup and no
+        // Supabase session. Forcing the anonymous flag disables every cloud sync
+        // path (they are all gated on !isAnonymous) and keeps all data on-device.
+        info.isAnonymous = true
+        info.needsSync = false
+        return info
+    }
+
+    /**
+     * Replaces the in-memory profile (used when restoring a local backup) and
+     * refreshes every exposed state flow.
+     */
+    fun replaceUserInfo(info: UserInfo) {
+        userInfo = info
+        userInfo.isAnonymous = true
+        userInfo.needsSync = false
+        coinsState.value = userInfo.coins
+        currentStreakState.value = userInfo.streak.currentStreak
+        activeBoostsState.value = userInfo.active_boosts
+        saveUserInfo(false)
     }
 
     private fun deleteLocalUserInfoCache(){

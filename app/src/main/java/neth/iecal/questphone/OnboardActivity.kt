@@ -15,14 +15,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
-import io.github.jan.supabase.auth.handleDeeplinks
 import neth.iecal.questphone.app.navigation.RootRoute
-import neth.iecal.questphone.app.screens.account.SetupNewPassword
 import neth.iecal.questphone.app.screens.onboard.OnBoarderView
 import neth.iecal.questphone.app.screens.onboard.subscreens.TermsScreen
 import neth.iecal.questphone.app.theme.LauncherTheme
 import neth.iecal.questphone.app.theme.customThemes.PitchBlackTheme
-import neth.iecal.questphone.core.Supabase
 
 
 @AndroidEntryPoint(ComponentActivity::class)
@@ -47,37 +44,18 @@ class OnboardActivity : ComponentActivity() {
 
             val context = LocalContext.current
 
-            val isPetDialogVisible = remember { mutableStateOf(true) }
-            val isLoginResetPassword = remember { mutableStateOf(false) }
-
             val isTosAccepted = remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 val tosp = context.getSharedPreferences("terms", MODE_PRIVATE)
                 isTosAccepted.value = tosp.getBoolean("isAccepted",false)
             }
 
-            LaunchedEffect(Unit) {
-                Supabase.supabase.handleDeeplinks(intent){
-                    if(it.type == "recovery"){
-                        isLoginResetPassword.value = true
-                    }
-                    Log.d("Supabase Deeplink",it.type.toString())
-                }
-            }
-
-            val startDestination = if (isLoginResetPassword.value) RootRoute.ResetPass.route
-            else if (!isTosAccepted.value) RootRoute.TermsScreen.route
+            val startDestination = if (!isTosAccepted.value) RootRoute.TermsScreen.route
             else RootRoute.OnBoard.route
 
             LauncherTheme(pitchBlackTheme) {
                 Surface {
                     val navController = rememberNavController()
-//
-//                    PetDialog(
-//                        petId = "turtie",
-//                        isPetDialogVisible,
-//                        navController
-//                    )
 
                     NavHost(
                         navController = navController,
@@ -86,11 +64,6 @@ class OnboardActivity : ComponentActivity() {
 
                         composable(RootRoute.OnBoard.route) {
                             OnBoarderView(navController)
-                        }
-                        composable(
-                            RootRoute.ResetPass.route
-                        ) {
-                            SetupNewPassword(navController)
                         }
 
                         composable(RootRoute.TermsScreen.route) {

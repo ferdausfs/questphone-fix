@@ -1,11 +1,11 @@
 package neth.iecal.questphone.app.screens.account
 
-import android.app.Activity
-import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,17 +71,16 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import neth.iecal.questphone.OnboardActivity
 import neth.iecal.questphone.R
 import neth.iecal.questphone.app.navigation.RootRoute
 import neth.iecal.questphone.app.screens.game.InventoryBox
 import neth.iecal.questphone.app.screens.quest.stats.components.HeatMapChart
 import neth.iecal.questphone.app.theme.LocalCustomTheme
 import neth.iecal.questphone.backed.repositories.UserRepository
-import neth.iecal.questphone.backed.triggerProfileSync
-import neth.iecal.questphone.backed.triggerQuestSync
+import neth.iecal.questphone.core.backup.LocalBackupManager
+import neth.iecal.questphone.core.backup.LocalBackupResult
 import nethical.questphone.backend.BuildConfig
 import nethical.questphone.core.core.utils.formatNumber
 import nethical.questphone.data.UserInfo
@@ -94,6 +94,7 @@ import javax.inject.Inject
 class UserInfoViewModel @Inject constructor(
     application: Application,
     private val userRepository: UserRepository,
+    private val localBackupManager: LocalBackupManager,
 ) : AndroidViewModel(application) {
 
     val userInfo: UserInfo = userRepository.userInfo
@@ -110,26 +111,47 @@ class UserInfoViewModel @Inject constructor(
         }
     } else null
 
-    init {
-        triggerProfileSync(application,false)
-    }
+    val lastBackupSummary = MutableStateFlow(localBackupManager.getLastBackupSummary())
+    val isBackupRunning = MutableStateFlow(false)
+    val backupMessage = MutableStateFlow<String?>(null)
 
-
-    fun logOut(onLoggedOut: () -> Unit) {
-        viewModelScope.launch {
-            userRepository.signOut()
-            val activityManager = application.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            activityManager.clearApplicationUserData()
-            withContext(Dispatchers.Main) {
-                onLoggedOut()
+    /**
+     * Exports profile + quests + stats + reminders to phone storage right now.
+     */
+    fun backupNow() {
+        if (isBackupRunning.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupRunning.value = true
+            backupMessage.value = null
+            val result = localBackupManager.createBackup()
+            lastBackupSummary.value = localBackupManager.getLastBackupSummary()
+            backupMessage.value = when (result) {
+                is LocalBackupResult.Success ->
+                    "Saved ${result.questCount} quests & ${result.statCount} stat entries → ${result.location}"
+                is LocalBackupResult.Failure ->
+                    "Backup failed: ${result.message}"
             }
+            isBackupRunning.value = false
         }
     }
 
-    fun onForcePull() {
-        if (!userInfo.isAnonymous) {
-            triggerProfileSync(application, true)
-            triggerQuestSync(application, true)
+    /**
+     * Restores the on-device data set from a previously exported backup file.
+     */
+    fun restoreFromBackup(uri: android.net.Uri) {
+        if (isBackupRunning.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupRunning.value = true
+            backupMessage.value = null
+            val result = localBackupManager.restore(uri)
+            lastBackupSummary.value = localBackupManager.getLastBackupSummary()
+            backupMessage.value = when (result) {
+                is LocalBackupResult.Success ->
+                    "Restored ${result.questCount} quests & ${result.statCount} stat entries ✓"
+                is LocalBackupResult.Failure ->
+                    "Restore failed: ${result.message}"
+            }
+            isBackupRunning.value = false
         }
     }
 
@@ -194,15 +216,7 @@ fun UserInfoScreen(viewModel: UserInfoViewModel = hiltViewModel(),navController:
                         })
                     )
                     Spacer(Modifier.size(4.dp))
-                    Menu(viewModel.userInfo.isAnonymous, {
-                        viewModel.logOut {
-                            val intent = Intent(context, OnboardActivity::class.java)
-                            context.startActivity(intent)
-                            (context as Activity).finish()
-                        }
-                    },navController,{
-                        viewModel.onForcePull()
-                    })
+                    Menu(navController)
                 }
                 Spacer(Modifier.size(32.dp))
 
@@ -330,6 +344,12 @@ fun UserInfoScreen(viewModel: UserInfoViewModel = hiltViewModel(),navController:
                 Spacer(modifier = Modifier.height(32.dp))
 
                 InventoryBox(navController)
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                BackupRestoreCard(viewModel)
+
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
@@ -337,9 +357,8 @@ fun UserInfoScreen(viewModel: UserInfoViewModel = hiltViewModel(),navController:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Menu(isAnonymous: Boolean,onLogout: () -> Unit,navController: NavController,onForcePull: ()->Unit ) {
+private fun Menu(navController: NavController) {
     var expanded by remember { mutableStateOf(false) }
-    var isLogoutInfoVisible by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     IconButton(onClick = { expanded = true }) {
@@ -353,15 +372,6 @@ private fun Menu(isAnonymous: Boolean,onLogout: () -> Unit,navController: NavCon
         expanded = expanded,
         onDismissRequest = { expanded = false }
     ) {
-        DropdownMenuItem(
-            text = { Text("Log Out") },
-            onClick = {
-                isLogoutInfoVisible = true
-                expanded = false
-                // handle click
-            }
-        )
-
         DropdownMenuItem(
             text = { Text("Communicate with us") },
             onClick = {
@@ -387,61 +397,82 @@ private fun Menu(isAnonymous: Boolean,onLogout: () -> Unit,navController: NavCon
                 shareCrashLog(context)
             }
         )
-        DropdownMenuItem(
-            text = { Text("Force Pull from servers") },
-            onClick = {
-                onForcePull()
-            }
-        )
+    }
+}
+
+/**
+ * Backup & Restore card for the fully local build. Shows the time of the last
+ * automatic daily backup and offers manual "Back up now" / "Restore from file"
+ * actions. Everything happens on-device — no server is ever contacted.
+ */
+@Composable
+private fun BackupRestoreCard(viewModel: UserInfoViewModel) {
+    val lastBackup by viewModel.lastBackupSummary.collectAsState()
+    val isRunning by viewModel.isBackupRunning.collectAsState()
+    val message by viewModel.backupMessage.collectAsState()
+
+    val filePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.restoreFromBackup(uri)
+        }
     }
 
-    if (isLogoutInfoVisible) {
-        BasicAlertDialog(
-            {
-                isLogoutInfoVisible = false
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = "Backup & Restore",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Your data lives on this phone only. A full copy " +
+                    "(profile, quests, stats, reminders) is saved to your phone " +
+                    "storage automatically every day.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            Text(
+                text = "Last backup: $lastBackup",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+            message?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
-
-        ) {
-            Surface {
-                Column(
-                    modifier = Modifier
-                        .padding(20.dp)
-                        .width(IntrinsicSize.Min),
-                    horizontalAlignment = Alignment.CenterHorizontally
+            Row(
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                TextButton(
+                    enabled = !isRunning,
+                    onClick = { viewModel.backupNow() }
                 ) {
-                    Text(
-                        text = "Are you sure you want to log out?",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    if (isAnonymous) {
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text =
-                                "You will lose all your quests, progress, stats and everything if you log out.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(if (isRunning) "Backing up…" else "Back up now")
+                }
+                TextButton(
+                    enabled = !isRunning,
+                    onClick = {
+                        filePicker.launch(
+                            arrayOf(
+                                "application/json",
+                                "application/octet-stream",
+                                "text/plain"
+                            )
                         )
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.End,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        TextButton(onClick = {
-                            isLogoutInfoVisible = false
-                        }) {
-                            Text("Cancel")
-                        }
-                        TextButton(onClick = {
-                            onLogout()
-                        }) {
-                            Text("Log Out", color = Color.Red)
-                        }
-                    }
+                ) {
+                    Text("Restore from file")
                 }
             }
         }

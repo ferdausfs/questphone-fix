@@ -25,6 +25,16 @@ class ProfileSyncWorker(val appContext: Context, params: WorkerParameters) : Cor
     params
 ) {
     override suspend fun doWork(): Result {
+        // Local-only build: cloud sync is permanently disabled. The user is always
+        // anonymous, so no Supabase session exists — bail out before any network
+        // call or foreground notification is created.
+        val userRepository = EntryPointAccessors.fromApplication(
+            applicationContext,
+            UserRepositoryEntryPoint::class.java
+        ).userRepository()
+        if (userRepository.userInfo.isAnonymous) {
+            return Result.success()
+        }
         setForegroundAsync(createForegroundInfo(appContext))
         val isFirstTimeSync = inputData.getBoolean(EXTRA_IS_FIRST_TIME, false)
 

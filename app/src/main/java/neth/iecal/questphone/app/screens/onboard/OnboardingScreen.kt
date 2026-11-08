@@ -23,7 +23,7 @@ import neth.iecal.questphone.MainActivity
 import neth.iecal.questphone.app.screens.account.SetupProfileScreen
 import neth.iecal.questphone.app.screens.onboard.subscreens.BlockedAppsView
 import neth.iecal.questphone.app.screens.onboard.subscreens.CalculateLifeStats
-import neth.iecal.questphone.app.screens.onboard.subscreens.LoginOnboard
+import neth.iecal.questphone.app.screens.onboard.subscreens.LocalDataOnboard
 import neth.iecal.questphone.app.screens.onboard.subscreens.NotificationPerm
 import neth.iecal.questphone.app.screens.onboard.subscreens.OverlayScreenPerm
 import neth.iecal.questphone.app.screens.onboard.subscreens.ScheduleExactAlarmPerm
@@ -52,7 +52,6 @@ fun OnBoarderView(navController: NavHostController) {
     LaunchedEffect(Unit) {
         isTosAccepted.value = context.getSharedPreferences("terms", MODE_PRIVATE).getBoolean("isAccepted",false)
     }
-    val isNextEnabledLogin = rememberSaveable {mutableStateOf(false)}
     val isNextEnabledSetupProfile = rememberSaveable {mutableStateOf(false)}
 
 
@@ -90,9 +89,9 @@ fun OnBoarderView(navController: NavHostController) {
             "We're here to save you",
             "Do a Quest → Earn growth → Unlock your app"
         ),
-                OnboardingContent.CustomPage(
-            isNextEnabled = isNextEnabledLogin){ ->
-            LoginOnboard(isNextEnabledLogin, navController)
+        OnboardingContent.CustomPage {
+            // Login/signup removed: this build is 100% local — no account needed.
+            LocalDataOnboard()
         },
 
         OnboardingContent.CustomPage(
