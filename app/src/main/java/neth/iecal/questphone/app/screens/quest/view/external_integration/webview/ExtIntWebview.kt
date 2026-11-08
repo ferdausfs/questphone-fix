@@ -24,6 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +61,20 @@ fun ExtIntWebview(
     val allowedPages = remember { mutableStateMapOf<String, Boolean>() } // URL -> allowed
     var pendingPermissionRequest by remember { mutableStateOf<PermissionRequest?>(null) }
     var pendingRequestUrl by remember { mutableStateOf<String?>(null) }
+
+    // Destroy the WebView (and release its Activity-bound bridge) when this screen
+    // leaves composition — previously the WebView leaked the whole Activity.
+    DisposableEffect(Unit) {
+        onDispose {
+            BroadcastCenter.unregister(context)
+            webView?.apply {
+                stopLoading()
+                loadUrl("about:blank")
+                destroy()
+            }
+            webView = null
+        }
+    }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -121,7 +136,7 @@ fun ExtIntWebview(
 
                     view?.evaluateJavascript("applyTheme($themeJson);", null)
                     view?.evaluateJavascript("injectData(${commonQuestInfo.quest_json});", null)
-                    Log.d("data", commonQuestInfo.quest_json)
+                    // (quest_json content is no longer logged — it can contain sensitive user data)
                 }
 
                 override fun onReceivedError(
@@ -182,8 +197,18 @@ fun ExtIntWebview(
             val json = JSONObject(commonQuestInfo.quest_json)
             if (json.has("webviewUrl")) {
                 val url = json.getString("webviewUrl")
-                lastUrl = url
-                loadUrl(url)
+                // Only https:// can be loaded. The quest_json may come from template
+                // repos, pasted user JSON or synced quests; loading arbitrary http://
+                // or custom schemes would expose the privileged WebAppInterface bridge
+                // to attacker-controlled content.
+                if (url.startsWith("https://", ignoreCase = true)) {
+                    lastUrl = url
+                    loadUrl(url)
+                } else {
+                    Log.e("ExtIntWebview", "Blocked non-https webviewUrl from quest_json")
+                    isError = true
+                    errorMessage = "Integration URL must use https://"
+                }
             }
         }
     }

@@ -2,7 +2,10 @@ package neth.iecal.questphone.app.screens.quest.setup.external_integration
 
 import android.app.Application
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Context
+import android.os.PersistableBundle
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -137,6 +140,13 @@ class ExternalIntegrationQuestVM @Inject constructor(
     fun copyTokenToClipboard(context: Context) {
         token.value?.token?.let { t ->
             val clip = ClipData.newPlainText("token", t)
+            // Mark the token as sensitive so it is hidden from clipboard UI previews
+            // and not echoed by the system (Android 13+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                clip.description.extras = PersistableBundle().apply {
+                    putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                }
+            }
             (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                 .setPrimaryClip(clip)
             Toast.makeText(context, "Token copied!", Toast.LENGTH_SHORT).show()
@@ -151,7 +161,7 @@ class ExternalIntegrationQuestVM @Inject constructor(
                     .postgrest["quests"]
                     .select {
                         filter {
-                            eq("user_id", Supabase.supabase.auth.currentUserOrNull()?.id.toString())
+                            eq("user_id", Supabase.supabase.auth.currentUserOrNull()?.id.orEmpty())
                             eq("integration_token", t.token)
                         }
                     }
@@ -181,9 +191,16 @@ class ExternalIntegrationQuestVM @Inject constructor(
             if(!userRepository.userInfo.isAnonymous) {
                 isLoading.value = true
                 val generateExtIntToken = GenerateExtIntToken()
+                // anonymous users have no access token — guard instead of `!!` crash
+                val accessToken = Supabase.supabase.auth.currentAccessTokenOrNull()
+                if (accessToken == null) {
+                    isLoading.value = false
+                    Toast.makeText(getApplication(), "You need to be logged in", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 val result = suspendCancellableCoroutine<Result<String>> { cont ->
                     generateExtIntToken.generateToken(
-                        Supabase.supabase.auth.currentAccessTokenOrNull()!!.toString()
+                        accessToken
                     ) {
                         cont.resume(it) {}
                     }

@@ -40,6 +40,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -192,7 +193,7 @@ class BaseQuestStatsViewVM @Inject constructor(
                 _weeklyAverageCompletions.value = weeklyAverageCompletions
 
             } catch (e: Exception) {
-                // Handle error
+                Log.e("BaseQuestStatsView", "Failed to load quest stats", e)
             } finally {
                 _isLoading.value = false
             }
@@ -248,7 +249,7 @@ class BaseQuestStatsViewVM @Inject constructor(
                     onSuccess()
                 }
             } catch (e: Exception) {
-                // Handle error
+                Log.e("BaseQuestStatsView", "Failed to delete quest", e)
             }
         }
     }

@@ -30,7 +30,7 @@ suspend fun fetchUrlContent(url: String): String? {
             val response = okHttpClient.newCall(request).execute()
             response.body?.string()
         } catch (e: Exception) {
-            Log.d("Error fetching url", e.toString())
+            Log.e("fetchUrlContent", "Error fetching url", e)
             null // Return null on error
         }
     }
@@ -61,7 +61,7 @@ fun triggerProfileSync(context: Context, isFirstLoginSync:Boolean = false) {
         WorkManager.getInstance(context)
             .enqueueUniqueWork("profile_sync", ExistingWorkPolicy.REPLACE, workRequest)
     }catch (e: Exception){
-        Log.e("Error occured starting profile sync",e.stackTrace.toString())
+        Log.e("Server", "Error occurred starting profile sync", e)
     }
 }
 
@@ -83,8 +83,8 @@ fun triggerStatsSync(context: Context, isFirstSync: Boolean = false, pullAllForT
         WorkManager.getInstance(context)
             .enqueueUniqueWork("stat_sync", ExistingWorkPolicy.REPLACE, workRequest)
     }catch (e: Exception){
-    Log.e("Error occured starting stats sync",e.stackTrace.toString())
-}
+        Log.e("Server", "Error occurred starting stats sync", e)
+    }
 
 }
 fun triggerQuestSync(context: Context, isFirstSync: Boolean = false, pullForQuest: String? = null) {
@@ -104,6 +104,6 @@ fun triggerQuestSync(context: Context, isFirstSync: Boolean = false, pullForQues
         WorkManager.getInstance(context)
             .enqueueUniqueWork("quest_sync", ExistingWorkPolicy.REPLACE, workRequest)
     }catch (e: Exception){
-        Log.e("Error occured starting Quest sync",e.stackTrace.toString())
+        Log.e("Server", "Error occurred starting Quest sync", e)
     }
 }

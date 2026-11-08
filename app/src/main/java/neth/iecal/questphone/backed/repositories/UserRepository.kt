@@ -261,6 +261,6 @@ class UserRepository @Inject constructor(
         tokens.add(string)
         userInfo.fcm_tokens = tokens
         saveUserInfo()
-        Log.d("saved Fcm token", tokens.toString())
+        Log.d("UserRepository", "FCM token saved (count=${tokens.size})")
     }
 }

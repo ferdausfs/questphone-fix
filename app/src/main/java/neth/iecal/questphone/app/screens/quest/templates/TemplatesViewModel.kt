@@ -149,7 +149,7 @@ class TemplatesViewModel @Inject constructor(
                         setVariable(it.name,it.default)
                     }
                 } catch (e: Exception) {
-                    Log.e("TemplateViewModel", "Error parsing JSON: ${e.message}")
+                    Log.e("TemplateViewModel", "Error parsing template JSON", e)
                 }
             }
             _isLoading.value = false

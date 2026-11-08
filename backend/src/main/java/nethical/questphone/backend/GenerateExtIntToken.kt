@@ -27,7 +27,8 @@ class GenerateExtIntToken {
         token: String,
         callback: (Result<String>) -> Unit
     ) {
-        Log.d("supabaseToken",token)
+        // Never log the live bearer token — it ends up in logcat/bugreports and can
+        // be replayed against the user's account until it expires.
         val request = Request.Builder()
             .url("$BASE_URL/api/gen-integration-token")
             .header("Authorization", "Bearer $token")
@@ -50,7 +51,7 @@ class GenerateExtIntToken {
                     }
 
                     val responseBody = response.body?.string()
-                    Log.d("response",responseBody.toString())
+                    Log.d(TAG, "Received integration-token response (${responseBody?.length ?: 0} bytes)")
                     if (responseBody.isNullOrEmpty()) {
                         Log.e(TAG, "Empty response from server")
                         callback(Result.failure(IOException("Empty response from server")))
@@ -60,7 +61,7 @@ class GenerateExtIntToken {
                     try {
                         val json = JSONObject(responseBody)
                         val result = json.getString("token")
-                        Log.i(TAG, "Validation result: $result")
+                        Log.i(TAG, "Integration token generated successfully")
                         callback(Result.success(result))
                     } catch (e: Exception) {
                         Log.e(TAG, "JSON parsing error: ${e.message}", e)

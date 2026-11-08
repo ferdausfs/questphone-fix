@@ -114,7 +114,9 @@ class MainActivity : ComponentActivity() {
 
         }
 
-        val currentTheme = themes[userRepository.userInfo.customization_info.equippedTheme]!!
+        // Safe fallback: a restored backup or synced profile can carry an unknown
+        // theme name; previously this `!!` caused an unrecoverable startup crash loop.
+        val currentTheme = themes[userRepository.userInfo.customization_info.equippedTheme] ?: PitchBlackTheme()
         setContent {
             val isUserOnboarded = remember {mutableStateOf(true)}
             var currentTheme = remember { mutableStateOf(currentTheme) }
@@ -142,15 +144,22 @@ class MainActivity : ComponentActivity() {
 
                     TheSystemDialog()
                     LaunchedEffect(Unit) {
-                        unSyncedQuestItems.collect {
-                            notificationScheduler.reloadAllReminders()
-                            if (context.isOnline() && !userRepository.userInfo.isAnonymous) {
-                                triggerQuestSync(applicationContext)
+                        // Each Flow must be collected in its own coroutine — a Room Flow
+                        // collect never completes, so a sequential second collect here was
+                        // unreachable and new unsynced stats never triggered a sync.
+                        launch {
+                            unSyncedQuestItems.collect {
+                                notificationScheduler.reloadAllReminders()
+                                if (context.isOnline() && !userRepository.userInfo.isAnonymous) {
+                                    triggerQuestSync(applicationContext)
+                                }
                             }
                         }
-                        unSyncedStatsItems.collect {
-                            if (context.isOnline() && !userRepository.userInfo.isAnonymous ) {
-                                triggerStatsSync(applicationContext)
+                        launch {
+                            unSyncedStatsItems.collect {
+                                if (context.isOnline() && !userRepository.userInfo.isAnonymous) {
+                                    triggerStatsSync(applicationContext)
+                                }
                             }
                         }
                     }

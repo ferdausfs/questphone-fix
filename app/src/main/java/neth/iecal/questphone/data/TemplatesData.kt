@@ -47,7 +47,8 @@ enum class VariableName(val types: VariableType,val default: String,val label : 
         wrapper
     }),
     feature2(VariableType.text, "", "Feature",{ wrapper, values,name ->
-        wrapper.AiSnap.features[1] = wrapper.AiSnap.features[0].replace(name,values[name]!!)
+        // was overwriting features[1] with features[0]'s content (copy-paste bug)
+        wrapper.AiSnap.features[1] = wrapper.AiSnap.features[1].replace(name,values[name]!!)
         wrapper
     }),
     taskDescription(VariableType.text,"","Task Description"),

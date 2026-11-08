@@ -265,13 +265,18 @@ class AppListViewModel @Inject constructor(
         val remainingFreePassesToday = prefs.getInt("freepass_count", 0) - 1
 
         prefs.edit {
-            putString("ladistracting_appsst_freepass_date", today)
+            // Correct key: the previous typo ("ladistracting_appsst_freepass_date")
+            // meant the stored date never updated and the daily free-pass count was
+            // never properly reset/decremented.
+            putString("last_freepass_date", today)
             putInt("freepass_count", remainingFreePassesToday)
         }
 
         requestAppUnlock(10)
         launchApp(context,_selectedPackage.value)
-        onConfirmUnlockApp(0)
+        // dismiss the free-pass dialog (previously done by the redundant
+        // onConfirmUnlockApp(0) call that was removed)
+        _showCoinDialog.value = false
     }
 
 

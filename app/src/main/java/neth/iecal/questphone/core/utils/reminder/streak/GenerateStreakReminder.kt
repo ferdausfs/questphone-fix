@@ -121,7 +121,7 @@ fun getLine(context: Context,file:String, line: Int): String? {
             null // File is empty
         }
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e("GenerateStreakReminder", "Failed to load streak reminder data", e)
         null
     }
 }

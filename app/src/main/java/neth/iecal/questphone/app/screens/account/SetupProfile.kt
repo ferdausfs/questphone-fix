@@ -102,7 +102,7 @@ class SetupProfileViewModel @Inject constructor(
             }else {
                 try {
                     Supabase.awaitSession()
-                    val userId = Supabase.supabase.auth.currentUserOrNull()?.id.toString()
+                    val userId = Supabase.supabase.auth.currentUserOrNull()?.id.orEmpty()
 
                     val profile = Supabase.supabase.from("profiles")
                         .select {
@@ -427,7 +427,7 @@ private fun copyFileFromUriToAppStorage(
 
         destinationFile
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e("SetupProfile", "Failed to process image", e)
         null
     }
 }

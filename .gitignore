@@ -15,3 +15,7 @@
 local.properties
 *.apk
 app/fdroid/*
+# signing secrets (never commit)
+keystore.properties
+*.keystore
+release.keystore

@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -81,6 +82,14 @@ import java.time.ZoneId
 import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+
+/** Neutral placeholder icon used when an app from usage stats can no longer be
+ *  resolved (e.g. it was uninstalled) — prevents NameNotFoundException crashes. */
+private val defaultAppIcon: ImageBitmap by lazy {
+    android.graphics.Bitmap.createBitmap(48, 48, android.graphics.Bitmap.Config.ARGB_8888).apply {
+        eraseColor(android.graphics.Color.LTGRAY)
+    }.asImageBitmap()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -248,8 +257,18 @@ fun ScreentimeStatsScreen() {
                         }
                     }
                     items(usageStats, key = { it.packageName }) { stat ->
-                        val appInfo = pm.getApplicationInfo(stat.packageName, 0)
-                        val icon = appInfo.loadIcon(pm).toBitmap().asImageBitmap()
+                        // Guard against apps that were uninstalled but still appear in
+                        // usage stats — getApplicationInfo/loadIcon used to crash the
+                        // whole screen with NameNotFoundException (also ran on every
+                        // recomposition, an IPC + bitmap decode each time).
+                        val appInfo = remember(stat.packageName) {
+                            runCatching { pm.getApplicationInfo(stat.packageName, 0) }.getOrNull()
+                        }
+                        val icon = remember(appInfo) {
+                            appInfo?.let {
+                                runCatching { it.loadIcon(pm).toBitmap().asImageBitmap() }.getOrNull()
+                            }
+                        }
 
                         Card(
                             modifier = Modifier
@@ -263,7 +282,7 @@ fun ScreentimeStatsScreen() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Image(
-                                    bitmap = icon,
+                                    bitmap = icon ?: defaultAppIcon,
                                     contentDescription = null,
                                     modifier = Modifier
                                         .size(48.dp)
@@ -274,7 +293,7 @@ fun ScreentimeStatsScreen() {
 
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        appInfo.loadLabel(pm).toString(),
+                                        appInfo?.loadLabel(pm)?.toString() ?: stat.packageName,
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1,
@@ -374,8 +393,10 @@ fun TopAppsSection(usageStats: List<ScreentimeStat>) {
             val maxTime = usageStats.maxOfOrNull { it.totalTime } ?: 1L
 
             usageStats.forEachIndexed { index, stat ->
-                val appInfo = pm.getApplicationInfo(stat.packageName, 0)
-                val icon = appInfo.loadIcon(pm).toBitmap().asImageBitmap()
+                val appInfo = runCatching { pm.getApplicationInfo(stat.packageName, 0) }.getOrNull()
+                val icon = appInfo?.let {
+                    runCatching { it.loadIcon(pm).toBitmap().asImageBitmap() }.getOrNull()
+                }
                 val percentage = (stat.totalTime.toFloat() / maxTime.toFloat())
 
                 Row(
@@ -409,7 +430,7 @@ fun TopAppsSection(usageStats: List<ScreentimeStat>) {
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Image(
-                        bitmap = icon,
+                        bitmap = icon ?: defaultAppIcon,
                         contentDescription = null,
                         modifier = Modifier
                             .size(40.dp)
@@ -420,7 +441,7 @@ fun TopAppsSection(usageStats: List<ScreentimeStat>) {
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            appInfo.loadLabel(pm).toString(),
+                            appInfo?.loadLabel(pm)?.toString() ?: stat.packageName,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,

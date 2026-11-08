@@ -12,6 +12,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dagger.hilt.android.EntryPointAccessors
 import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import neth.iecal.questphone.backed.repositories.QuestRepository
 import neth.iecal.questphone.backed.repositories.QuestRepositoryEntryPoint
@@ -54,10 +55,16 @@ class QuestSyncWorker(
 
         try {
             performSync(isFirstTime, specificQuestId)
-        } catch (e: Exception) {
-            Log.e("QuestSyncWorker", "Sync failed", e)
+        } catch (e: CancellationException) {
+            // propagate cancellation instead of reporting failure
             sendSyncBroadcast(SyncStatus.OVER)
-            return Result.failure()
+            throw e
+        } catch (e: Exception) {
+            Log.e("QuestSyncWorker", "Sync failed (attempt ${runAttemptCount + 1})", e)
+            sendSyncBroadcast(SyncStatus.OVER)
+            // Retry with WorkManager's exponential backoff so a full outage recovers
+            // once the network is back — but cap it to avoid retrying forever.
+            return if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
 
         sendSyncBroadcast(SyncStatus.OVER)
@@ -101,17 +108,27 @@ class QuestSyncWorker(
 
     private suspend fun performRegularSync() {
         val unSyncedQuests = questRepository.getUnSyncedQuests().first()
+        var failed = 0
 
         unSyncedQuests.forEach { quest ->
             try {
                 Supabase.supabase.postgrest["quests"].upsert(quest)
                 questRepository.markAsSynced(quest.id)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                failed++
                 Log.e("QuestSyncWorker", "Regular sync failed $quest", e)
             }
         }
 
-        Log.d("QuestSyncWorker", "Regular sync completed, synced ${unSyncedQuests.size} quests")
+        // If EVERY item failed the sync did not really succeed — report failure so
+        // WorkManager retries, instead of silently pretending the sync completed.
+        if (unSyncedQuests.isNotEmpty() && failed == unSyncedQuests.size) {
+            throw IllegalStateException("Quest sync failed for all ${failed} items")
+        }
+
+        Log.d("QuestSyncWorker", "Regular sync completed, synced ${unSyncedQuests.size - failed}/${unSyncedQuests.size} quests")
     }
 
     private suspend fun pushAndPullForSpecific(userId: String, questId: String) {

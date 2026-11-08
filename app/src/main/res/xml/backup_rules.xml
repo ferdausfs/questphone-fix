@@ -1,13 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older that API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full backup content for devices older than API 31.
+     By default everything is backed up; the excludes keep credential /
+     session data (Supabase auth session, integration token, user profile)
+     out of backups. -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="supabase_auth_pr.xml" />
+    <exclude domain="sharedpref" path="externalIntToken.xml" />
+    <exclude domain="sharedpref" path="user_info.xml" />
 </full-backup-content>

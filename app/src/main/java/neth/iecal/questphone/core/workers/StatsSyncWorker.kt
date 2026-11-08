@@ -123,7 +123,11 @@ class StatsSyncWorker(
         unSyncedStats.forEach { stat ->
             try {
                 Supabase.supabase.postgrest["quest_stats"].upsert(stat)
-                questRepository.markAsSynced(stat.id)
+                // Mark the STAT as synced (was incorrectly marking a quest row before,
+                // so stats were re-uploaded on every sync forever)
+                statsRepository.markAsSynced(stat.id)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("StatSyncWorker", "Regular sync failed $stat", e)
             }

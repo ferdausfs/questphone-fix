@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- By default everything is backed up; the excludes below keep credential /
+     session data (Supabase auth session, integration token, user profile)
+     out of cloud backup and device-to-device transfer, so auth tokens can
+     never be restored onto another device. -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Include all SharedPreferences -->
-        <include domain="sharedpref" path=".*" />
+        <exclude domain="sharedpref" path="supabase_auth_pr.xml" />
+        <exclude domain="sharedpref" path="externalIntToken.xml" />
+        <exclude domain="sharedpref" path="user_info.xml" />
     </cloud-backup>
 
     <device-transfer>
-        <!-- Include all SharedPreferences for device-to-device transfer -->
-        <include domain="sharedpref" path=".*" />
+        <exclude domain="sharedpref" path="supabase_auth_pr.xml" />
+        <exclude domain="sharedpref" path="externalIntToken.xml" />
+        <exclude domain="sharedpref" path="user_info.xml" />
     </device-transfer>
 </data-extraction-rules>

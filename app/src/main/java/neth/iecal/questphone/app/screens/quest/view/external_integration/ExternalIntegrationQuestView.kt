@@ -63,7 +63,9 @@ class ExternalIntegrationQuestViewVM @Inject constructor (questRepository: Quest
         quickRewardUser(coins)
     }
     fun getUserData():String{
-        return json.encodeToString(userRepository.userInfo)
+        // Strip FCM device tokens before handing profile data to webview content —
+        // any loaded page could otherwise exfiltrate them.
+        return json.encodeToString(userRepository.userInfo.copy(fcm_tokens = emptyList()))
     }
     suspend fun getQuestStats(onDone:(String)->Unit){
         val stats = statsRepository.getStatsByQuestId(commonQuestInfo.id).first()

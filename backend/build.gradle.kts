@@ -1,10 +1,11 @@
+import org.gradle.api.GradleException
 import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    kotlin("plugin.serialization") version "2.0.20"
+    alias(libs.plugins.kotlin.serialization)
     id("com.google.devtools.ksp")
 
 }
@@ -13,6 +14,19 @@ val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localProperties.load(FileInputStream(localPropertiesFile))
+}
+
+// Fail fast with a clear message instead of silently baking the literal string
+// "null" into the APK (the previous behaviour when local.properties was absent).
+fun requiredLocalProperty(name: String): String {
+    val value = localProperties.getProperty(name)
+    if (value.isNullOrBlank()) {
+        throw GradleException(
+            "$name is missing from local.properties. Copy local.properties.example " +
+                "to local.properties and fill in the values (see README → Building locally)."
+        )
+    }
+    return value
 }
 
 android {
@@ -26,9 +40,10 @@ android {
         consumerProguardFiles("consumer-rules.pro")
 
 
-        buildConfigField("String", "SUPABASE_URL", "\"${localProperties["SUPABASE_URL"]}\"")
-        buildConfigField("String", "SUPABASE_API_KEY", "\"${localProperties["SUPABASE_API_KEY"]}\"")
-        buildConfigField("String", "API_URL", "\"${localProperties["API_URL"]}\"")
+        buildConfigField("String", "SUPABASE_URL", "\"${requiredLocalProperty("SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_API_KEY", "\"${requiredLocalProperty("SUPABASE_API_KEY")}\"")
+        // Legacy field — not referenced anywhere in code, so it stays optional
+        buildConfigField("String", "API_URL", "\"${localProperties.getProperty("API_URL") ?: ""}\"")
     }
 
     buildTypes {

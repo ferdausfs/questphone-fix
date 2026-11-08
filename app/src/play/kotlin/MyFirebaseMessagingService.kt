@@ -34,7 +34,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d("FCM", "New token: $token")
+        // FCM token must never be logged (device-targeting recon via logcat/bugreports)
     }
 
     private fun showNotification(title: String?, message: String?) {

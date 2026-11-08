@@ -255,7 +255,7 @@ fun getAQuote(context: Context): String? {
             null // File is empty
         }
     } catch (e: Exception) {
-        e.printStackTrace()
+        Log.e("GenerateQuestReminder", "Failed to load quest reminder data", e)
         null
     }
 }

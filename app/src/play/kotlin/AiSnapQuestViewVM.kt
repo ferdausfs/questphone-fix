@@ -90,15 +90,27 @@ class AiSnapQuestViewVM @Inject constructor(
 
         currentStep.value = EvaluationStep.INITIALIZING
         currentStep.value = EvaluationStep.LOADING_MODEL
+        // Anonymous users have no access token — previously this `!!` crashed the app.
+        val accessToken = Supabase.supabase.auth.currentAccessTokenOrNull()
+        if (accessToken == null) {
+            error.value = "You need to be logged in to use online evaluation"
+            currentStep.value = EvaluationStep.COMPLETED
+            isAiEvaluating.value = false
+            return
+        }
         val photoFile = java.io.File(application.filesDir, AI_SNAP_PIC)
         val compressedFile = resizeAndCompressImage(photoFile, 1080, 50)
         client.validateTask(
             compressedFile,
             aiQuest.taskDescription,
             aiQuest.features.joinToString(","),
-            Supabase.supabase.auth.currentAccessTokenOrNull()!!.toString()
-        ) {
-            results.value = it.getOrNull()
+            accessToken
+        ) { result ->
+            result.exceptionOrNull()?.let { e ->
+                android.util.Log.e("AiSnapQuestViewVM", "Online evaluation failed", e)
+                error.value = e.message ?: "Evaluation failed"
+            }
+            results.value = result.getOrNull()
             currentStep.value = EvaluationStep.COMPLETED
             if(results.value?.isValid == true) {
                 onEvaluationComplete()

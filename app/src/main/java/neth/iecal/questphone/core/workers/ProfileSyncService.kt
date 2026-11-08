@@ -15,6 +15,7 @@ import androidx.work.WorkerParameters
 import dagger.hilt.android.EntryPointAccessors
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.CancellationException
 import neth.iecal.questphone.backed.repositories.UserRepositoryEntryPoint
 import neth.iecal.questphone.core.Supabase
 import nethical.questphone.data.SyncStatus
@@ -31,8 +32,14 @@ class ProfileSyncWorker(val appContext: Context, params: WorkerParameters) : Cor
             performSync(isFirstTimeSync)
             Log.d("ProfileSyncWorker", "Sync completed successfully")
             Result.success()
+        } catch (e: CancellationException) {
+            sendSyncBroadcast(SyncStatus.OVER)
+            throw e
         } catch (e: Exception) {
             Log.e("ProfileSyncWorker", "Sync failed", e)
+            // Always tell listeners the sync round is over — previously the OVER
+            // broadcast was skipped on failure and UIs stayed stuck on ONGOING.
+            sendSyncBroadcast(SyncStatus.OVER)
             Result.retry()
         }
     }

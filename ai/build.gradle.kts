@@ -54,7 +54,6 @@ dependencies {
 tasks.register<Exec>("buildSentencePiece") {
     workingDir = file("$projectDir/src/main/sentencepiece")
     environment("ANDROID_NDK", android.ndkDirectory.absolutePath)
-    environment("ANDROID_NDK", android.ndkDirectory.absolutePath)
     environment("OUTPUT_DIR", "${layout.buildDirectory}/sentencepiece_output")
     environment("SENTENCEPIECE_SRC", workingDir.absolutePath)
     environment("ANDROID_API", "21")

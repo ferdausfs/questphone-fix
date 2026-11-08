@@ -15,7 +15,10 @@ import nethical.questphone.core.core.utils.VibrationHelper
 import javax.inject.Inject
 
 
-@HiltAndroidApp(Application::class)
+// The Hilt Gradle plugin is applied, so the canonical no-arg form is required —
+// the plugin bytecode-transforms MyApp to extend the generated Hilt_MyApp.
+// (@HiltAndroidApp(Application::class) + aggregating task = build error)
+@HiltAndroidApp
 class MyApp : Application() {
 
     private lateinit var connectivityManager: ConnectivityManager

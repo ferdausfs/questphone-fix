@@ -1,5 +1,6 @@
 package neth.iecal.questphone.app.screens.account.login
 
+import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -82,8 +83,14 @@ class LoginViewModel @Inject constructor(
                     this.password = p
                 }
                 onSuccess()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: AuthRestException) {
                 errorMessage.value = e.errorDescription + "\n error code: ${e.errorCode}" + "\n ${e.error}"
+            } catch (e: Exception) {
+                // network/IO failures must not crash the app — surface them to the UI
+                Log.e("LoginViewModel", "Sign-in failed", e)
+                errorMessage.value = "Sign-in failed: ${e.message ?: "network error"}"
             } finally {
                 isLoading.value = false
             }
@@ -120,8 +127,13 @@ class LoginViewModel @Inject constructor(
                         }
                         signUpStep.value = SignUpStep.VERIFICATION
                         onVerificationSent()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: AuthRestException) {
                         errorMessage.value = e.message ?: "Sign-up failed"
+                    } catch (e: Exception) {
+                        Log.e("LoginViewModel", "Sign-up failed", e)
+                        errorMessage.value = "Sign-up failed: ${e.message ?: "network error"}"
                     } finally {
                         isLoading.value = false
                     }
@@ -158,11 +170,18 @@ class LoginViewModel @Inject constructor(
             isLoading.value = true
 
             viewModelScope.launch {
-                Supabase.supabase.auth.resetPasswordForEmail(email.value)
+                try {
+                    Supabase.supabase.auth.resetPasswordForEmail(email.value)
+                    forgetPasswordStep.value = ForgotPasswordStep.VERIFICATION
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("LoginViewModel", "Password reset failed", e)
+                    errorMessage.value = "Failed to send reset email: ${e.message ?: "network error"}"
+                } finally {
+                    isLoading.value = false
+                }
             }
-
-            forgetPasswordStep.value = ForgotPasswordStep.VERIFICATION
-            isLoading.value = false
         }
     }
 

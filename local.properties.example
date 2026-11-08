@@ -1,0 +1,12 @@
+# Copy this file to `local.properties` and fill in the real values.
+# local.properties is gitignored and never committed.
+#
+# Required keys (used by the :backend module → BuildConfig):
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_API_KEY=your-publishable-or-anon-key
+
+# Optional (legacy BuildConfig field, not referenced in code):
+API_URL=https://api.questphone.app
+
+# Android SDK location is also kept here (Android Studio writes this automatically):
+# sdk.dir=/absolute/path/to/Android/sdk

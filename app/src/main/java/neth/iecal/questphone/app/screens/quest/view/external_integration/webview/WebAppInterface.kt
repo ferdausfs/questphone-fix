@@ -45,6 +45,14 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
     @JavascriptInterface
     fun sendBroadcast(action: String, jsonData: String?) {
+        // Block ALL app-internal launcher broadcasts: a hostile integration page must
+        // not be able to unlock apps, refresh the blocker, or start/stop deep focus
+        // via this bridge (INTENT_ACTION_* constants all live under "launcher.launcher.").
+        // Legitimate integrations only RECEIVE broadcasts — they never need to send these.
+        if (action.startsWith("launcher.launcher.")) {
+            Log.e("WebAppInterface", "Blocked privileged broadcast from webview: $action")
+            return
+        }
         val intent = Intent(action)
         intent.putExtra("payload", jsonData ?: "{}")
         context.sendBroadcast(intent)
@@ -143,7 +151,7 @@ class WebAppInterface(private val context: Context, private val webView: WebView
             context.startActivity(Intent.createChooser(shareIntent, "Share Image via"))
 
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("WebAppInterface", "Failed to share image", e)
         }
     }
 
@@ -165,6 +173,17 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     }
     @JavascriptInterface
     fun fetchDataWithoutCorsAsync(url: String, headersJson: String?, callback: String) {
+        // The URL must be https and the callback name a plain JS identifier —
+        // both are interpolated into evaluated JavaScript, so unvalidated values
+        // would let a page inject arbitrary JS into this privileged context.
+        if (!url.startsWith("https://", ignoreCase = true)) {
+            Log.e("WebAppInterface", "Blocked non-https fetch request")
+            return
+        }
+        if (!Regex("^[A-Za-z0-9_.]{1,64}$").matches(callback)) {
+            Log.e("WebAppInterface", "Blocked invalid JS callback name")
+            return
+        }
         Log.d("Webview","Fetching without cors")
         Thread {
             val result = try {

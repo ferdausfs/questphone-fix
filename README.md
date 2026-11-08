@@ -106,3 +106,43 @@ Press on any title to get a detailed explanation about them
 - Room 
 - Supabase
 - Dagger Hilt
+
+## Building locally
+
+> [!IMPORTANT]
+> This repo ships the `ai/src/main/sentencepiece` dependency as a **git submodule** —
+> clone with `git clone --recurse-submodules` or run `git submodule update --init`
+> first, otherwise the `fdroid` flavor fails to build.
+
+1. **Prerequisites**: JDK 17+, Android SDK (platform 36, build-tools 35), git
+2. **Clone with submodules**:
+   ```bash
+   git clone --recurse-submodules https://github.com/<you>/questphone-fix.git
+   ```
+3. **Create `local.properties`** (copy from `local.properties.example` and fill in):
+   ```properties
+   sdk.dir=/absolute/path/to/Android/sdk
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_API_KEY=your-publishable-key
+   API_URL=https://api.questphone.app
+   ```
+   The build **fails fast with a clear error** if the Supabase keys are missing
+   (previously it silently baked the string `"null"` into the APK).
+4. **(Optional) Signing** — create a `keystore.properties` in the repo root:
+   ```properties
+   storeFile=/absolute/path/to/release.keystore
+   storePassword=...
+   keyAlias=...
+   keyPassword=...
+   ```
+   Without it, `release` builds fall back to the debug keystore so the APK stays
+   installable. Never commit either file.
+5. **Build**:
+   ```bash
+   ./gradlew :app:assemblePlayRelease     # Play flavor (Firebase)
+   ./gradlew :app:assembleFdroidRelease   # F-Droid flavor (on-device AI)
+   ```
+   Output: `app/build/outputs/apk/play/release/` (universal APK included).
+
+CI: GitHub Actions workflow [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml)
+builds signed APKs on every `v*` tag (keystore via `KEYSTORE_BASE64` secret, optional).

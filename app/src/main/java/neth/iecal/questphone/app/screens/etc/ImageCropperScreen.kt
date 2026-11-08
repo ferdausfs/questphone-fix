@@ -572,7 +572,7 @@ fun saveBitmapToFile(context: Context, bitmap: Bitmap, filename: String, onDone:
         }
         onDone()
     } catch (e: IOException) {
-        e.printStackTrace()
+        android.util.Log.e("ImageCropperScreen", "Failed to save cropped image", e)
         // Handle error appropriately
         throw e
     }

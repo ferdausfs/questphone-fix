@@ -434,7 +434,9 @@ private fun VariableEditDialog(
                             try{
                                 it.toInt()
                                 textValue = it
-                            }catch (_: Exception){} },
+                            }catch (_: NumberFormatException){
+                                // ignore non-numeric input (validation, not an error)
+                            } },
                         label = { Text(variable.label) },
                         modifier = Modifier.fillMaxWidth(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

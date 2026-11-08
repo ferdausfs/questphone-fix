@@ -25,6 +25,8 @@ import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import neth.iecal.questphone.MainActivity
@@ -51,6 +53,11 @@ class AppBlockerService : Service() {
 
     // Default locked apps - will be overridden by saved preferences
     private val lockedApps = mutableSetOf<String>()
+
+    // Service-scoped scope so background work is cancelled with the service
+    // (previously an unstructured CoroutineScope leaked and mutated lockedApps
+    // concurrently with the main-thread poller)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 
     companion object {
@@ -96,7 +103,10 @@ class AppBlockerService : Service() {
         Log.d("AppBlockerSrvieFg", "registering reciever")
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(refreshReceiver, filter, RECEIVER_EXPORTED)
+                // NOT_EXPORTED: these broadcasts are app-internal only. EXPORTED previously
+                // allowed ANY third-party app to broadcast INTENT_ACTION_UNLOCK_APP and
+                // unlock blocked apps without spending coins (bypassing the blocker).
+                registerReceiver(refreshReceiver, filter, RECEIVER_NOT_EXPORTED)
             } else {
                 registerReceiver(refreshReceiver, filter)
             }
@@ -121,6 +131,7 @@ class AppBlockerService : Service() {
         notificationManager.cancel(NOTIFICATION_ID)
 
         unregisterReceiver(refreshReceiver)
+        serviceScope.cancel()
     }
 
     private fun createNotificationChannel() {
@@ -266,11 +277,10 @@ class AppBlockerService : Service() {
             showLockScreenFor(detectedForegroundPackage)
             return true
         } else {
-            try {
-                val interval =
-                    AppBlockerServiceInfo.unlockedApps[detectedForegroundPackage]!! - System.currentTimeMillis()
-                startCooldownTimer(detectedForegroundPackage, interval.toLong())
-            } catch (_: Exception) {
+            val expiry = AppBlockerServiceInfo.unlockedApps[detectedForegroundPackage]
+            if (expiry != null) {
+                val interval = expiry - System.currentTimeMillis()
+                if (interval > 0) startCooldownTimer(detectedForegroundPackage, interval)
             }
         }
         return false
@@ -447,7 +457,7 @@ class AppBlockerService : Service() {
     }
 
     private fun turnDeepFocus() {
-        CoroutineScope(Dispatchers.IO).launch {
+        serviceScope.launch {
             val pm = applicationContext.packageManager
             val result = reloadApps(pm, applicationContext)
 
@@ -479,7 +489,7 @@ class AppBlockerService : Service() {
                 INTENT_ACTION_REFRESH_APP_BLOCKER -> loadLockedApps()
                 INTENT_ACTION_START_DEEP_FOCUS -> {
                     AppBlockerServiceInfo.deepFocus.exceptionApps =
-                        intent.getStringArrayListExtra("exception")?.toHashSet()!!
+                        intent.getStringArrayListExtra("exception")?.toHashSet() ?: hashSetOf()
                     AppBlockerServiceInfo.deepFocus.isRunning = true
                     AppBlockerServiceInfo.deepFocus.duration = intent.getLongExtra("duration", 0L)
                     startCooldownTimer("deepfocus", AppBlockerServiceInfo.deepFocus.duration)
@@ -708,8 +718,7 @@ class AppBlockerService : Service() {
             notificationManager.notify(NOTIFICATION_ID, notification)
 
         } catch (e: Exception) {
-            Log.e("AppBlockerService", "Failed to update notification: ${e.message}")
-            e.printStackTrace()
+            Log.e("AppBlockerService", "Failed to update notification", e)
         }
     }
 
