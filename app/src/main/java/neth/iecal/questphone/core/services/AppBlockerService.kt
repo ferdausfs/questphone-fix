@@ -13,6 +13,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.os.Build
 import android.os.Handler
@@ -44,6 +45,7 @@ class AppBlockerService : Service() {
     private lateinit var usageStatsManager: UsageStatsManager
     private lateinit var handler: Handler
     private var timerRunnable: Runnable? = null
+    private var receiverRegistered = false
     private var lastForegroundPackage: String? = null
     private var isTimerRunning = false
     private var timerRunningForPackage = ""
@@ -73,15 +75,13 @@ class AppBlockerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, createNotification(),FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        }else{
-            startForeground(NOTIFICATION_ID, createNotification())
-        }
+        // The channel must exist BEFORE startForeground, otherwise the persistent
+        // notification can be silently dropped after a service restart on some OEMs.
+        createNotificationChannel()
+        startAppBlockerForeground()
         Log.d(TAG, "AppBlockService onCreate")
         usageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         handler = Handler(Looper.getMainLooper())
-        createNotificationChannel()
         setupBroadcastListeners()
         loadLockedApps()
         loadUnlockedAppsFromServer()
@@ -89,6 +89,31 @@ class AppBlockerService : Service() {
 
         startMonitoringApps()
         AppBlockerServiceInfo.appBlockerService = this
+    }
+
+    /**
+     * Android 14+ caps dataSync foreground services at 6 hours per 24h. When the
+     * budget is exhausted the system throws ForegroundServiceTypeTimeLimitExceededException
+     * and kills the app — the classic "it crashes spontaneously every few hours".
+     * The blocker is therefore started as a specialUse FGS on API 34+ (declared in
+     * the manifest with PROPERTY_SPECIAL_USE_FGS_SUBTYPE); dataSync remains for older APIs.
+     */
+    private fun startAppBlockerForeground() {
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                startForeground(NOTIFICATION_ID, createNotification(), FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else ->
+                startForeground(NOTIFICATION_ID, createNotification())
+        }
+    }
+
+    override fun onTimeout(startId: Int) {
+        // Android 15+: the FGS time budget ran out. Stop cleanly instead of letting
+        // the system throw. AppBlockerReminderReceiver restarts the service.
+        Log.w(TAG, "Foreground service timeout reached — stopping cleanly")
+        stopSelf(startId)
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -110,8 +135,10 @@ class AppBlockerService : Service() {
             } else {
                 registerReceiver(refreshReceiver, filter)
             }
+            receiverRegistered = true
         } catch (e: Exception) {
             Log.e("AppBlockerService", "Failed to register receiver: ${e.message}")
+            receiverRegistered = false
         }
     }
 
@@ -130,7 +157,14 @@ class AppBlockerService : Service() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.cancel(NOTIFICATION_ID)
 
-        unregisterReceiver(refreshReceiver)
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(refreshReceiver)
+            } catch (e: Exception) {
+                Log.e("AppBlockerService", "Receiver already unregistered: ${e.message}")
+            }
+            receiverRegistered = false
+        }
         serviceScope.cancel()
     }
 
@@ -250,7 +284,11 @@ class AppBlockerService : Service() {
                 Log.d(TAG, "Temporary unlock expired for: $packageName")
             }
         }
-        expiredApps.forEach { AppBlockerServiceInfo.unlockedApps.remove(it) }
+        if (expiredApps.isNotEmpty()) {
+            expiredApps.forEach { AppBlockerServiceInfo.unlockedApps.remove(it) }
+            // Persist the removal, otherwise expired unlocks resurrect after a restart.
+            saveUnlockedAppsToServer()
+        }
     }
 
     private fun shouldShowLockScreen(
@@ -389,7 +427,10 @@ class AppBlockerService : Service() {
     }
 
     fun loadUnlockedAppsFromServer() {
-        AppBlockerServiceInfo.unlockedApps = userRepository.getUnlockedPackages()
+        // Defensive copy: assigning the live userInfo map aliases it to the service
+        // and makes every unlock cleanup a concurrent mutation of shared state
+        // (ConcurrentModificationException source for JSON encoding elsewhere).
+        AppBlockerServiceInfo.unlockedApps = HashMap(userRepository.getUnlockedPackages())
     }
 
     fun isAppUnlocked(packageName: String): Boolean {
@@ -471,10 +512,12 @@ class AppBlockerService : Service() {
                     ) && it.packageName != "neth.iecal.questphone"
                 }
 
-                lockedApps.clear()
-                lockedApps.addAll(allApps.map { it.packageName })
-                Log.d("AppBlockerServiceFg", "Turning on FocusMode ${lockedApps.toString()}")
+                // lockedApps is read by the main-thread poller every 100 ms — always
+                // mutate it on the main dispatcher to avoid torn updates.
                 withContext(Dispatchers.Main) {
+                    lockedApps.clear()
+                    lockedApps.addAll(allApps.map { it.packageName })
+                    Log.d("AppBlockerServiceFg", "Turning on FocusMode ${lockedApps.toString()}")
                     Toast.makeText(applicationContext, "Deep Focus Activated", Toast.LENGTH_LONG).show()
                 }
             }
@@ -629,7 +672,7 @@ class AppBlockerService : Service() {
         }
 
         // Start the timer runnable
-        handler.post(timerRunnable!!)
+        timerRunnable?.let { handler.post(it) }
     }
 
     private fun stopCooldownTimer() {
@@ -724,11 +767,7 @@ class AppBlockerService : Service() {
 
     private fun cancelTimerNotification() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, createNotification(),FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            }else{
-                startForeground(NOTIFICATION_ID, createNotification())
-            }
+            startAppBlockerForeground()
             Log.d("AppBlockerService", "Notification cancelled")
         } catch (e: Exception) {
             Log.e("AppBlockerService", "Failed to cancel notification: ${e.message}")

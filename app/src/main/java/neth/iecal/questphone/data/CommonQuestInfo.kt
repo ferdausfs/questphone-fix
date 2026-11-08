@@ -18,12 +18,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import neth.iecal.questphone.backed.repositories.QuestRepository
-import neth.iecal.questphone.core.Supabase
 import nethical.questphone.core.core.utils.getCurrentDate
 import nethical.questphone.data.BaseIntegrationId
 import nethical.questphone.data.DayOfWeek
@@ -49,7 +47,10 @@ import javax.inject.Singleton
 data class CommonQuestInfo(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
-    val user_id: String = Supabase.supabase.auth.currentUserOrNull()?.id.orEmpty(),
+    // Local-only build: no Supabase session exists. The old default called
+    // Supabase.auth.currentUserOrNull() on EVERY construction, lazily
+    // initializing the client on the main thread.
+    val user_id: String = "",
     var title: String = "",
     var reward: Int = 5,
     var integration_id : BaseIntegrationId = BaseIntegrationId.DEEP_FOCUS,
@@ -70,24 +71,35 @@ data class CommonQuestInfo(
 
 object BaseQuestConverter {
 
+    /**
+     * Room converters run on EVERY row of EVERY query. One malformed column
+     * (legacy enum name, corrupt JSON, interrupted restore) must degrade to a
+     * safe default instead of crashing the whole app (home screen crash loop).
+     */
     @TypeConverter
     fun fromDayOfWeekSet(set: Set<DayOfWeek>): String = json.encodeToString(set.toList())
 
     @TypeConverter
     fun toDayOfWeekSet(jsonStr: String): Set<DayOfWeek> =
-        json.decodeFromString<List<DayOfWeek>>(jsonStr).toSet()
+        runCatching { json.decodeFromString<List<DayOfWeek>>(jsonStr).toSet() }
+            .getOrDefault(emptySet())
 
     @TypeConverter
     fun fromTimeRange(range: List<Int>): String = json.encodeToString(range)
 
     @TypeConverter
-    fun toTimeRange(jsonStr: String): List<Int> = json.decodeFromString(jsonStr)
+    fun toTimeRange(jsonStr: String): List<Int> =
+        runCatching { json.decodeFromString<List<Int>>(jsonStr) }
+            .getOrDefault(listOf(0, 24))
+            .let { if (it.size < 2) listOf(0, 24) else it.take(2) }
 
     @TypeConverter
     fun fromIntegrationId(id: BaseIntegrationId): String = id.name
 
     @TypeConverter
-    fun toIntegrationId(name: String): BaseIntegrationId = BaseIntegrationId.valueOf(name)
+    fun toIntegrationId(name: String): BaseIntegrationId =
+        runCatching { BaseIntegrationId.valueOf(name) }
+            .getOrDefault(BaseIntegrationId.DEEP_FOCUS)
 }
 
 @Dao

@@ -119,7 +119,12 @@ fun OnBoarderView(
     val isFirstPage = currentPage.value == 0
     val isLastPage = currentPage.value == pages.size - 1
 
-    val pagerState = rememberPagerState(pageCount = { pages.size }, initialPage = currentPage.value)
+    // The persisted page index survives app updates. The local-only edition
+    // removed the login/signup pages, so an index saved by an older build can
+    // now exceed the page count — rememberPagerState would throw
+    // IllegalArgumentException and Onboarding would crash-loop forever.
+    val initialPage = currentPage.value.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    val pagerState = rememberPagerState(pageCount = { pages.size }, initialPage = initialPage)
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { page ->

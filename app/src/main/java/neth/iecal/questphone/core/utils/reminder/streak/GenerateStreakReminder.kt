@@ -127,11 +127,16 @@ fun getLine(context: Context,file:String, line: Int): String? {
 }
 
 private fun calculateIrregularity(streakBreaks: Map<String, Int>): Double {
-    if (streakBreaks.isEmpty()) return 0.0
+    // Only consider keys that are valid ISO dates (old versions wrote
+    // locale-localized dates and restores can inject garbage).
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val validEntries = streakBreaks.entries.filter { (key, _) ->
+        runCatching { LocalDate.parse(key, formatter) }.isSuccess
+    }
+    if (validEntries.isEmpty()) return 0.0
 
     // Sort dates from oldest to newest
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val sortedEntries = streakBreaks.entries.sortedBy { LocalDate.parse(it.key, formatter) }
+    val sortedEntries = validEntries.sortedBy { LocalDate.parse(it.key, formatter) }
 
     var weightedSum = 0.0
     var totalWeight = 0.0

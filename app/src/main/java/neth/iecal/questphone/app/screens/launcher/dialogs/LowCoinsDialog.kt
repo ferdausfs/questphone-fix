@@ -31,10 +31,19 @@ fun LowCoinsDialog(
     navController: NavController
 ) {
     val context = LocalContext.current
-    val appIconDrawable = context.packageManager.getApplicationIcon(pkgName)
+    // The app can be uninstalled between list render and dialog open —
+    // getApplicationIcon would throw NameNotFoundException during composition.
+    val appIconDrawable = remember(pkgName) {
+        try {
+            context.packageManager.getApplicationIcon(pkgName)
+        } catch (e: Exception) {
+            android.graphics.drawable.ColorDrawable(android.graphics.Color.GRAY)
+        }
+    }
     val bitmap = remember (appIconDrawable) {
-        val bitmap =
-            createBitmap(appIconDrawable.intrinsicWidth, appIconDrawable.intrinsicHeight)
+        val w = appIconDrawable.intrinsicWidth.coerceAtLeast(1)
+        val h = appIconDrawable.intrinsicHeight.coerceAtLeast(1)
+        val bitmap = createBitmap(w, h)
         val canvas = Canvas(bitmap)
         appIconDrawable.setBounds(0, 0, canvas.width, canvas.height)
         appIconDrawable.draw(canvas)

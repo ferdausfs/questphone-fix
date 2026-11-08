@@ -17,10 +17,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
 import neth.iecal.questphone.backed.repositories.QuestRepository
 import neth.iecal.questphone.backed.repositories.StatsRepository
 import neth.iecal.questphone.backed.repositories.UserRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import neth.iecal.questphone.core.services.reloadServiceInfo
 import neth.iecal.questphone.core.utils.reminder.NotificationScheduler
 import neth.iecal.questphone.data.CommonQuestInfo
@@ -30,6 +32,8 @@ import neth.iecal.questphone.data.StatsInfo
 import nethical.questphone.data.UserInfo
 import nethical.questphone.data.json
 import java.io.File
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -92,10 +96,13 @@ class LocalBackupManager @Inject constructor(
             val stats = statsRepository.getAllStatsForUser().first()
             val reminders = reminderDao.getAll()
 
+            // Encode a deep-copied snapshot: the live UserInfo HashMaps are mutated
+            // on the main thread while this worker serializes them in the background
+            // (ConcurrentModificationException = silently failed daily backups).
             val payload = LocalBackupPayload(
                 created_at = System.currentTimeMillis(),
                 app_version = appVersion(),
-                user_info = userRepository.userInfo,
+                user_info = userRepository.snapshotUserInfo(),
                 quests = quests,
                 stats = stats,
                 reminders = reminders
@@ -129,7 +136,9 @@ class LocalBackupManager @Inject constructor(
 
             val payload = try {
                 json.decodeFromString(LocalBackupPayload.serializer(), text)
-            } catch (e: SerializationException) {
+            } catch (e: Exception) {
+                // DateTimeParseException & friends from custom serializers are NOT
+                // SerializationException subclasses — catch everything.
                 return LocalBackupResult.Failure("This is not a QuestPhone backup file")
             }
 
@@ -137,9 +146,15 @@ class LocalBackupManager @Inject constructor(
                 return LocalBackupResult.Failure("This is not a QuestPhone backup file")
             }
 
+            // Sanitize BEFORE anything is written: a backup can contain garbage
+            // dates (old locale-digit bug, hand-edited files) that would otherwise
+            // crash unrelated screens days later.
+            UserRepository.sanitizeUserInfo(payload.user_info, resetInvalidStreak = true)
+            val sanitizedQuests = payload.quests.map { sanitizeQuest(it) }
+
             questRepository.clearAll()
-            if (payload.quests.isNotEmpty()) {
-                questRepository.upsertAll(payload.quests)
+            if (sanitizedQuests.isNotEmpty()) {
+                questRepository.upsertAll(sanitizedQuests)
             }
 
             statsRepository.deleteAll()
@@ -150,7 +165,13 @@ class LocalBackupManager @Inject constructor(
                 reminderDao.upsertAll(payload.reminders)
             }
 
-            userRepository.replaceUserInfo(payload.user_info)
+            withContext(NonCancellable) {
+                // Swap the live profile on the main thread; doing this from an IO
+                // dispatcher races the UI (lost updates after restore).
+                withContext(Dispatchers.Main) {
+                    userRepository.replaceUserInfo(payload.user_info)
+                }
+            }
 
             // Re-schedule every reminder from the restored data and refresh the
             // app blocker service info so the restored block list applies at once.
@@ -171,6 +192,20 @@ class LocalBackupManager @Inject constructor(
             Log.e(TAG, "Restore failed", e)
             LocalBackupResult.Failure(e.message ?: "Unknown error")
         }
+    }
+
+    /** Repairs quest rows that would crash parsers later (time_range, dates). */
+    private fun sanitizeQuest(quest: CommonQuestInfo): CommonQuestInfo {
+        if (quest.time_range.size < 2) {
+            quest.time_range = listOf(0, 24)
+        }
+        if (quest.auto_destruct.isNotBlank()) {
+            val ok = runCatching {
+                LocalDate.parse(quest.auto_destruct, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            }.isSuccess
+            if (!ok) quest.auto_destruct = ""
+        }
+        return quest
     }
 
     fun getLastBackupSummary(): String {
@@ -202,7 +237,15 @@ class LocalBackupManager @Inject constructor(
 
     private fun writeInternalBackup(fileName: String, bytes: ByteArray) {
         val dir = File(context.filesDir, INTERNAL_DIR).apply { mkdirs() }
-        File(dir, fileName).writeBytes(bytes)
+        // Atomic write (temp file + rename): a process kill mid-write must never
+        // leave a torn backup file behind.
+        val tmp = File(dir, "$fileName.tmp")
+        tmp.writeBytes(bytes)
+        val dst = File(dir, fileName)
+        if (!tmp.renameTo(dst)) {
+            dst.writeBytes(bytes)
+            tmp.delete()
+        }
         val backups = dir.listFiles()
             ?.filter { it.name.startsWith("questphone-backup-") }
             ?.sortedBy { it.name }

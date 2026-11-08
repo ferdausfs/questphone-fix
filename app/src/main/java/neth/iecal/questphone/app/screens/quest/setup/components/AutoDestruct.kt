@@ -270,8 +270,14 @@ fun DateSelector(title:String = "Auto Destroy",onSelected: (String)->Unit) {
                 TextButton(
                     onClick = {
                         showDialog = false
-                        onSelected(
-                            selectedDate?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd")).toString())
+                        // selectedDate is nullable — the old code called
+                        // .toString() on the formatted String?, producing the
+                        // literal "null" as auto_destruct, which crashed
+                        // LocalDate.parse every time the quest was opened.
+                        val formatted = selectedDate?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+                        if (formatted != null) {
+                            onSelected(formatted)
+                        }
                     },
                     modifier = Modifier.scale(buttonScale)
                 ) {

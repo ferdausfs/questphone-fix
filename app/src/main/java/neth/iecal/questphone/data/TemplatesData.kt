@@ -41,58 +41,71 @@ enum class VariableName(val types: VariableType,val default: String,val label : 
     auto_destruct(VariableType.date,"9999-06-21","End Date"),
     time_range(VariableType.timeRange,"[0,24]", "Time Range"),
 
-    //AiSnap Vars
+    //AiSnap Vars — all setters are total functions: remote templates can ship
+    // missing values or short lists; a crash on "Save" would be reproducible.
     feature1(VariableType.text, "", "Feature",{ wrapper, values,name ->
-        wrapper.AiSnap.features[0] = wrapper.AiSnap.features[0].replace(name,values[name]!!)
+        val replacement = values[name].orEmpty()
+        val idx = 0
+        if (idx < wrapper.AiSnap.features.size) {
+            wrapper.AiSnap.features[idx] = wrapper.AiSnap.features[idx].replace(name, replacement)
+        }
         wrapper
     }),
     feature2(VariableType.text, "", "Feature",{ wrapper, values,name ->
-        // was overwriting features[1] with features[0]'s content (copy-paste bug)
-        wrapper.AiSnap.features[1] = wrapper.AiSnap.features[1].replace(name,values[name]!!)
+        val replacement = values[name].orEmpty()
+        val idx = 1
+        if (idx < wrapper.AiSnap.features.size) {
+            wrapper.AiSnap.features[idx] = wrapper.AiSnap.features[idx].replace(name, replacement)
+        }
         wrapper
     }),
     taskDescription(VariableType.text,"","Task Description"),
 
     //Deep Focus vars
     initialFocusGoal(VariableType.number,"0","Initial Goal in Minutes",{ wrapper,values,name ->
-        wrapper.DeepFocus.focusTimeConfig.initialTime = values[name]!!
+        wrapper.DeepFocus.focusTimeConfig.initialTime = values[name].orEmpty()
         wrapper.DeepFocus.nextFocusDurationInMillis = wrapper.DeepFocus.focusTimeConfig.initialTimeInMs
         wrapper
     }),
     incrementFocusGoalBy(VariableType.number,"0","Increment By in Minutes", {wrapper, values,name ->
-        wrapper.DeepFocus.focusTimeConfig.incrementTime = values[name]!!
+        wrapper.DeepFocus.focusTimeConfig.incrementTime = values[name].orEmpty()
         wrapper
     }),
     finalFocusGoal(VariableType.number,"0","Final Goal in Hours",{wrapper, values,name ->
-        if(wrapper.DeepFocus.focusTimeConfig.initialTime.toInt()>values[name]!!.toInt()){
+        val initial = wrapper.DeepFocus.focusTimeConfig.initialTime.toIntOrNull() ?: 0
+        val final = values[name]?.toIntOrNull() ?: 0
+        if(initial > final){
             wrapper.DeepFocus.focusTimeConfig.finalTime = wrapper.DeepFocus.focusTimeConfig.initialTime
             wrapper
         }else {
-            wrapper.DeepFocus.focusTimeConfig.finalTime = values[name]!!
+            wrapper.DeepFocus.focusTimeConfig.finalTime = values[name].orEmpty()
             wrapper
         }
     }),
     unrestrictedApps(VariableType.appSelector,"[]","Unrestricted Apps",{wrapper, values,name ->
-        wrapper.DeepFocus.unrestrictedApps = json.decodeFromString<Set<String>>(values[name]!!)
+        wrapper.DeepFocus.unrestrictedApps = runCatching {
+            json.decodeFromString<Set<String>>(values[name].orEmpty())
+        }.getOrDefault(emptySet())
         wrapper
     }),
 
     //  Health connect vars
     initialHealthGoal(VariableType.number,"0","Initial Goal",{ wrapper,values,name ->
-        wrapper.HealthConnect.healthGoalConfig.initial = values[name]!!.toInt()
+        wrapper.HealthConnect.healthGoalConfig.initial = values[name]?.toIntOrNull() ?: 0
         wrapper.HealthConnect.nextGoal = wrapper.HealthConnect.healthGoalConfig.initial
         wrapper
     }),
     incrementHealthGoalBy(VariableType.number,"0","Increment By", {wrapper, values,name ->
-        wrapper.HealthConnect.healthGoalConfig.increment = values[name]!!.toInt()
+        wrapper.HealthConnect.healthGoalConfig.increment = values[name]?.toIntOrNull() ?: 0
         wrapper
     }),
     finalHealthGoal(VariableType.number,"0","Final Goal",{wrapper, values,name ->
-        if(wrapper.HealthConnect.healthGoalConfig.initial>values[name]!!.toInt()){
+        val final = values[name]?.toIntOrNull() ?: 0
+        if(wrapper.HealthConnect.healthGoalConfig.initial > final){
             wrapper.HealthConnect.healthGoalConfig.final = wrapper.HealthConnect.healthGoalConfig.initial
             wrapper
         }else {
-            wrapper.HealthConnect.healthGoalConfig.final = values[name]!!.toInt()
+            wrapper.HealthConnect.healthGoalConfig.final = final
             wrapper
         }
     }),

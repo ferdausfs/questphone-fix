@@ -5,6 +5,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import neth.iecal.questphone.core.utils.reminder.streak.StreakReminderReceiver
 import java.util.Calendar
 
@@ -29,9 +30,26 @@ fun scheduleDailyNotification(context: Context, hour: Int, minute: Int) {
         }
     }
 
-    alarmManager.setExactAndAllowWhileIdle(
-        AlarmManager.RTC_WAKEUP,
-        calendar.timeInMillis,
-        pendingIntent
-    )
+    // SCHEDULE_EXACT_ALARM is denied by default for targetSdk 33+ on Android 13+;
+    // calling setExactAndAllowWhileIdle without permission throws SecurityException.
+    // This runs from HomeScreenViewModel.init (the home screen!) on every render,
+    // so an unguarded call turns the whole launcher into a crash loop.
+    val canScheduleExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        alarmManager.canScheduleExactAlarms()
+    } else {
+        true
+    }
+    if (canScheduleExact) {
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            pendingIntent
+        )
+    } else {
+        alarmManager.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            calendar.timeInMillis,
+            pendingIntent
+        )
+    }
 }

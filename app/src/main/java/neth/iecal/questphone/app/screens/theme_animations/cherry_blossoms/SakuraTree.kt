@@ -47,8 +47,11 @@ class SakuraTreeViewModel
 
     fun getSeed(streak: Int): Long {
         val sakuraInfoJsonRaw = userRepository.userInfo.customization_info.themeData["Sakura Tree"]
+        // runCatching: corrupt/stale-schema themeData previously crashed the
+        // home screen on every launch while the theme was equipped.
         val sakuraInfoJson = if(sakuraInfoJsonRaw != null)
-            json.decodeFromString<SakuraTreeInfo>(sakuraInfoJsonRaw)
+            runCatching { json.decodeFromString<SakuraTreeInfo>(sakuraInfoJsonRaw) }
+                .getOrDefault(SakuraTreeInfo())
         else
             SakuraTreeInfo()
         if(streak==0) {

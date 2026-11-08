@@ -242,7 +242,10 @@ class BaseQuestStatsViewVM @Inject constructor(
     fun deleteQuest(onSuccess: () -> Unit) {
         viewModelScope.launch {
             try {
-                val quest = questRepository.getQuest(_baseData.value.title)
+                // Delete by the quest's PRIMARY KEY. The old lookup by title
+                // silently targeted the wrong quest: titles are user-typed and
+                // NOT unique, ids are.
+                val quest = questRepository.getQuestById(_baseData.value.id)
                 quest?.let {
                     it.is_destroyed = true
                     questRepository.upsertQuest(it)
@@ -1100,9 +1103,10 @@ fun calculateLongestStreak(
                 currentStreak = 0
             }
         }
-        while (currentDate <= endDate) {
-            currentDate = currentDate.plus(1, DateTimeUnit.DAY)
-        }
+        // Advance ONE day. The inner "while (currentDate <= endDate)" below
+        // consumed the whole range in the first outer iteration, so the longest
+        // streak was always computed from a single day.
+        currentDate = currentDate.plus(1, DateTimeUnit.DAY)
     }
 
     return longestStreak

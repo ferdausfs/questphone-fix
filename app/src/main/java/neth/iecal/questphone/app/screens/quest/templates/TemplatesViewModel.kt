@@ -23,6 +23,7 @@ import neth.iecal.questphone.data.TemplateContent
 import neth.iecal.questphone.data.VariableName
 import neth.iecal.questphone.data.convertToTemplate
 import neth.iecal.questphone.data.toAdv
+import nethical.questphone.data.DayOfWeek
 import nethical.questphone.data.json
 import javax.inject.Inject
 
@@ -160,19 +161,31 @@ class TemplatesViewModel @Inject constructor(
         Log.d("vars", variableValues.toString())
         _isLoading.value = true
         selectedTemplateContent.value?.let {
-            it.basicQuest.auto_destruct = variableValues.value.getOrDefault("auto_destruct", "9999-12-31")
-            it.basicQuest.selected_days =
-                json.decodeFromString(variableValues.value["selected_days"].toString())
+            try {
+                it.basicQuest.auto_destruct = variableValues.value.getOrDefault("auto_destruct", "9999-12-31")
+                it.basicQuest.selected_days =
+                    runCatching {
+                        json.decodeFromString<Set<DayOfWeek>>(variableValues.value["selected_days"].toString())
+                    }.getOrDefault(emptySet())
 
-            var templateExtra = it.questExtra
-            Log.d("Declared Variables", it.questExtraVariableDeclaration.toString())
-            it.questExtraVariableDeclaration.forEach {
-                templateExtra = it.setter(templateExtra, variableValues.value, it.name)
+                var templateExtra = it.questExtra
+                Log.d("Declared Variables", it.questExtraVariableDeclaration.toString())
+                // Remote template content drives these setters — one bad variable
+                // must abort the save with an error, not crash the app.
+                it.questExtraVariableDeclaration.forEach {
+                    templateExtra = runCatching {
+                        it.setter(templateExtra, variableValues.value, it.name)
+                    }.getOrDefault(templateExtra)
+                }
+                Log.d("FInal data", templateExtra.toString())
+                it.basicQuest.quest_json =
+                    templateExtra.getQuestJson(it.basicQuest.integration_id.toAdv())
+                Log.d("Final Data", it.basicQuest.toString())
+            } catch (e: Exception) {
+                Log.e("TemplateViewModel", "Failed to build quest from template", e)
+                _isLoading.value = false
+                return
             }
-            Log.d("FInal data", templateExtra.toString())
-            it.basicQuest.quest_json =
-                templateExtra.getQuestJson(it.basicQuest.integration_id.toAdv())
-            Log.d("Final Data", it.basicQuest.toString())
             viewModelScope.launch {
                 questRepository.upsertQuest(it.basicQuest)
                 withContext(Dispatchers.Main) {

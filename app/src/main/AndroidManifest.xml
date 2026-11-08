@@ -23,6 +23,7 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
@@ -99,11 +100,20 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- The app blocker must run 24/7. The dataSync FGS type is limited to
+             6 hours per 24h on Android 14+; when the cap is hit the system throws
+             ForegroundServiceTypeTimeLimitExceededException and crashes the app.
+             specialUse has no such time cap and is the recommended type for
+             app-blocking foreground services. dataSync is kept for API < 34. -->
         <service
             android:name=".core.services.AppBlockerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Digital wellbeing launcher: a persistent service watches the foreground app to enforce user-created app-blocking quests (screen-time commitments)." />
+        </service>
 
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

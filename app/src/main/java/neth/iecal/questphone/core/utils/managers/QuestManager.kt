@@ -27,23 +27,34 @@ class QuestHelper(val context: Context) {
         private const val PREF_NAME = "all_quest_preferences"
         private const val QUEST_IS_RUNNING_SUFFIX = "quest_state_"
 
+        /**
+         * time_range can be shorter than 2 elements (imported JSON, template or
+         * restored backup). getOrElse keeps these helpers total — they are called
+         * from the HomeScreen sort comparator, i.e. on every launcher render.
+         */
+        private fun startHour(baseData: CommonQuestInfo): Int = baseData.time_range.getOrElse(0) { 0 }
+        private fun endHour(baseData: CommonQuestInfo): Int = baseData.time_range.getOrElse(1) { 24 }
+
         fun isInTimeRange(baseData: CommonQuestInfo): Boolean {
             val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-            val timeRange = baseData.time_range
-            return currentHour in timeRange[0]..timeRange[1]
+            return currentHour in startHour(baseData)..endHour(baseData)
         }
 
 
         fun isNeedAutoDestruction(baseData: CommonQuestInfo): Boolean {
             val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
             val today = LocalDate.now()
-            val autoDestruct = LocalDate.parse(baseData.auto_destruct, formatter)
+            // auto_destruct can be "", "null" or any garbage string (older versions
+            // and imports). Unparseable = never auto-destruct.
+            val autoDestruct = runCatching {
+                LocalDate.parse(baseData.auto_destruct, formatter)
+            }.getOrNull() ?: return false
             return today >= autoDestruct
         }
 
         fun isTimeOver(baseData: CommonQuestInfo): Boolean {
             val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-            return currentHour > baseData.time_range[1]
+            return currentHour > endHour(baseData)
         }
     }
 }

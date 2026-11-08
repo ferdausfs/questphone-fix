@@ -10,6 +10,7 @@ import android.util.Log
 import androidx.annotation.CallSuper
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,22 +44,30 @@ class ReminderBroadcastReceiver : HiltBroadcastReceiver() {
             val description = intent.getStringExtra(NotificationScheduler.EXTRA_REMINDER_DESCRIPTION)
                 ?: "You have a new reminder."
 
-            CoroutineScope(Dispatchers.Default).launch {
-                val quest = questRepository.getQuestById(reminderId)
-                withContext(Dispatchers.Main) {
-                    if(quest!=null){
-                        val isNotCompleted = quest.last_completed_on != getCurrentDate()
-                        generateQuestReminder(context,quest)
-                        if (reminderId.isNotEmpty()) {
-                            if(isNotCompleted) {
-                                // Display the notification using the extracted details
-                                showNotification(it, reminderId, title, description)
-                                Log.d("ReminderBroadcastReceiver", "Received alarm for reminder ID: $reminderId, Title: '$title'")
+            CoroutineScope(Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+                Log.e("ReminderBroadcastReceiver", "Reminder handling failed", e)
+            }).launch {
+                try {
+                    val quest = questRepository.getQuestById(reminderId)
+                    withContext(Dispatchers.Main) {
+                        if(quest!=null){
+                            val isNotCompleted = quest.last_completed_on != getCurrentDate()
+                            generateQuestReminder(context,quest)
+                            if (reminderId.isNotEmpty()) {
+                                if(isNotCompleted) {
+                                    // Display the notification using the extracted details
+                                    showNotification(it, reminderId, title, description)
+                                    Log.d("ReminderBroadcastReceiver", "Received alarm for reminder ID: $reminderId, Title: '$title'")
+                                }
+                            } else {
+                                Log.e("ReminderBroadcastReceiver", "Received intent with an invalid reminder ID.")
                             }
-                        } else {
-                            Log.e("ReminderBroadcastReceiver", "Received intent with an invalid reminder ID.")
                         }
                     }
+                } catch (e: Exception) {
+                    // Fires from AlarmManager in the background — a corrupt quest
+                    // row must never crash the process.
+                    Log.e("ReminderBroadcastReceiver", "Reminder processing failed", e)
                 }
             }
 

@@ -43,5 +43,10 @@ fun openAccessibilityServiceScreen(context: Context,cls: Class<*>) {
 fun sendRefreshRequest(context: Context, action: String) {
     Log.d("refreshReq","loaded")
     val intent = Intent(action)
+    // The blocker registers its receiver with RECEIVER_NOT_EXPORTED; on
+    // Android 14+ implicit broadcasts are NOT delivered to it, even from this
+    // same app. setPackage makes the intent explicit so Deep Focus start/stop
+    // and block-list refreshes actually reach the service.
+    intent.setPackage(context.packageName)
     context.sendBroadcast(intent)
 }

@@ -98,7 +98,16 @@ fun CameraScreen(onPicClicked: ()->Unit) {
                     .fillMaxSize()
                     .aspectRatio(4.3f),
                 update = { view ->
-                    val cameraProvider = cameraProviderFuture.get()
+                    // cameraProviderFuture.get() blocks the MAIN thread until the
+                    // provider future resolves; on slow devices the first frames
+                    // freeze → ANR ("app hangs/dies when opening the camera").
+                    // A bounded wait turns the hang into a logged, recoverable skip.
+                    val cameraProvider = try {
+                        cameraProviderFuture.get(6, java.util.concurrent.TimeUnit.SECONDS)
+                    } catch (e: Exception) {
+                        Log.e("CameraScreen", "Camera provider not ready yet", e)
+                        return@AndroidView
+                    }
                     val preview = Preview.Builder()
                         .setResolutionSelector(
                             ResolutionSelector.Builder()

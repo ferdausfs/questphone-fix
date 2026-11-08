@@ -164,11 +164,14 @@ class SetupProfileViewModel @Inject constructor(
         _isLoading.value = true
 
         if (userRepository.userInfo.isAnonymous) {
-            userRepository.userInfo = UserInfo(
-                username = _username.value,
-                full_name = _name.value,
-                has_profile = _profileUri.value != null || _profileUrl.value != null
-            )
+            // Update the existing profile IN PLACE. The old code replaced the
+            // whole UserInfo object with a fresh one, silently wiping the
+            // user's streak, XP, coins and inventory and desyncing every
+            // StateFlow that still pointed at the discarded object.
+            val info = userRepository.userInfo
+            info.username = _username.value
+            info.full_name = _name.value
+            info.has_profile = _profileUri.value != null || _profileUrl.value != null
             if (_profileUri.value != null) {
                 copyFileFromUriToAppStorage(context, _profileUri.value!!)
             }

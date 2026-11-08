@@ -3,11 +3,10 @@ package neth.iecal.questphone.core.utils.reminder
 import android.content.Context
 import android.util.Log
 import androidx.core.content.edit
-import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import neth.iecal.questphone.core.Supabase
 import neth.iecal.questphone.core.utils.reminder.streak.getLine
 import neth.iecal.questphone.data.CommonQuestInfo
 import neth.iecal.questphone.data.ReminderData
@@ -21,11 +20,20 @@ import java.util.Calendar
 import java.util.Locale
 import kotlin.random.Random
 
+/**
+ * Any exception inside this fire-and-forget scope would kill the whole process
+ * (it runs from MainActivity, BootReceiver and after every quest write). Log and
+ * carry on instead of crashing.
+ */
+private val reminderExceptionHandler = CoroutineExceptionHandler { _, e ->
+    Log.e("GenerateQuestReminder", "Reminder generation failed", e)
+}
+
 fun generateQuestReminder(context: Context, quest: CommonQuestInfo) {
     val dao = ReminderDatabaseProvider.getInstance(context).reminderDao()
-    val userId = Supabase.supabase.auth.currentAccessTokenOrNull().toString()
+    val userId = "local"
 
-    val sdf = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+    val sdf = SimpleDateFormat("yyyyMMdd", Locale.US)
     val now = Calendar.getInstance()
     val today = sdf.format(now.time)
 
@@ -52,9 +60,12 @@ fun generateQuestReminder(context: Context, quest: CommonQuestInfo) {
             val nextDayEnum = nextDayCal.convertToDayOfWeek()
         } while (quest.selected_days.isNotEmpty() && nextDayEnum !in quest.selected_days)
 
-        val nextDay = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(nextDayCal.time)
+        val nextDay = SimpleDateFormat("yyyyMMdd", Locale.US).format(nextDayCal.time)
 
-        val (startHour, endHour) = quest.time_range
+        // time_range shorter than 2 elements (imported/template quest) must not
+        // crash the destructuring — fall back to "all day".
+        val startHour = quest.time_range.getOrElse(0) { 0 }
+        val endHour = quest.time_range.getOrElse(1) { 24 }
         val reminderTimeCal = Calendar.getInstance().apply {
             time = nextDayCal.time
             if (startHour == 0 && endHour == 24) {
@@ -84,7 +95,7 @@ fun generateQuestReminder(context: Context, quest: CommonQuestInfo) {
         Log.d("Reminder", "Set for ${quest.id} next valid day ($nextDay) at ${unixToReadable(nextReminder.timeMillis)}")
     }
 
-    CoroutineScope(Dispatchers.IO).launch {
+    CoroutineScope(Dispatchers.IO + reminderExceptionHandler).launch {
         val existing = dao.getRemindersByQuestId(quest.id)
         val todayDayOfWeek = Calendar.getInstance().convertToDayOfWeek()
         if (quest.selected_days.isNotEmpty() && todayDayOfWeek !in quest.selected_days) {
@@ -112,7 +123,8 @@ fun generateQuestReminder(context: Context, quest: CommonQuestInfo) {
         }
         quest.selected_days
 
-        val (startHour, endHour) = quest.time_range
+        val startHour = quest.time_range.getOrElse(0) { 0 }
+        val endHour = quest.time_range.getOrElse(1) { 24 }
         var reminder: ReminderData? = null
 
         if (startHour == 0 && endHour == 24) {

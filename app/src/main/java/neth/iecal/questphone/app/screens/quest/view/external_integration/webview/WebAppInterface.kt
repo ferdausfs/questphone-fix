@@ -29,13 +29,14 @@ class WebAppInterface(private val context: Context, private val webView: WebView
 
     @JavascriptInterface
     fun onQuestCompleted() {
-        viewQuestVM.saveMarkedQuestToDb()
-        Log.d("WebAppInterface", "Quest Completed")
-        Toast.makeText(
-            context,
-            "Quest completed!",
-            Toast.LENGTH_SHORT
-        ).show()
+        try {
+            viewQuestVM.saveMarkedQuestToDb()
+            Log.d("WebAppInterface", "Quest Completed")
+            Toast.makeText(context, "Quest completed!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            // Any exception on the JavaBridge thread kills the process.
+            Log.e("WebAppInterface", "onQuestCompleted failed", e)
+        }
     }
 
     @JavascriptInterface
@@ -58,15 +59,25 @@ class WebAppInterface(private val context: Context, private val webView: WebView
         context.sendBroadcast(intent)
     }
     @JavascriptInterface
-    fun getUserData(): String{
-        return viewQuestVM.getUserData()
+    fun getUserData(): String {
+        return try {
+            viewQuestVM.getUserData()
+        } catch (e: Exception) {
+            Log.e("WebAppInterface", "getUserData failed", e)
+            "{}"
+        }
     }
 
 
     @JavascriptInterface
     fun registerReceiver(actionsJson: String) {
-        val actions: List<String> = json.decodeFromString(actionsJson)
-        BroadcastCenter.register(context, webView, actions)
+        try {
+            val actions: List<String> = json.decodeFromString(actionsJson)
+            BroadcastCenter.register(context, webView, actions)
+        } catch (e: Exception) {
+            // Malformed JSON from web content must not crash the process.
+            Log.e("WebAppInterface", "registerReceiver failed", e)
+        }
     }
 
     @JavascriptInterface
@@ -93,36 +104,49 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     
     @JavascriptInterface
     fun setAlarmedNotification(triggerMillis: Long,title:String,description: String){
-        val alarmManager = AlarmHelper(context)
-        alarmManager.setAlarm(triggerMillis,title,description)
+        try {
+            val alarmManager = AlarmHelper(context)
+            alarmManager.setAlarm(triggerMillis,title,description)
+        } catch (e: Exception) {
+            Log.e("WebAppInterface", "setAlarmedNotification failed", e)
+        }
     }
     @JavascriptInterface
     fun openApp(packageName: String) {
-        val pm = context.packageManager
-        val intent = pm.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-        } else {
-            // App not installed, open Play Store
-            val playIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = "https://play.google.com/store/apps/details?id=$packageName".toUri()
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            val pm = context.packageManager
+            val intent = pm.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+            } else {
+                // App not installed, open Play Store
+                val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                    data = "https://play.google.com/store/apps/details?id=$packageName".toUri()
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(playIntent)
             }
-            context.startActivity(playIntent)
+        } catch (e: Exception) {
+            // No browser/store on the device → ActivityNotFoundException.
+            Log.e("WebAppInterface", "openApp failed", e)
         }
     }
     @JavascriptInterface
     fun shareText(title: String, text: String) {
-        val shareIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TITLE, title)
-            putExtra(Intent.EXTRA_TEXT, text)
-            type = "text/plain"
+        try {
+            val shareIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TITLE, title)
+                putExtra(Intent.EXTRA_TEXT, text)
+                type = "text/plain"
+            }
+            val chooser = Intent.createChooser(shareIntent, "Share via")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            Log.e("WebAppInterface", "shareText failed", e)
         }
-        val chooser = Intent.createChooser(shareIntent, "Share via")
-        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(chooser)
     }
     @JavascriptInterface
     fun shareImage(base64: String) {
@@ -163,12 +187,15 @@ class WebAppInterface(private val context: Context, private val webView: WebView
     @JavascriptInterface
     fun getAllStatsForQuest() {
         CoroutineScope(Dispatchers.IO).launch {
-            val stats = viewQuestVM.getQuestStats {
-                webView.post {
-                    webView.evaluateJavascript("onStatsReceived(${JSONObject.quote(it)});", null)
+            try {
+                viewQuestVM.getQuestStats {
+                    webView.post {
+                        webView.evaluateJavascript("onStatsReceived(${JSONObject.quote(it)});", null)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("WebAppInterface", "getAllStatsForQuest failed", e)
             }
-
         }
     }
     @JavascriptInterface

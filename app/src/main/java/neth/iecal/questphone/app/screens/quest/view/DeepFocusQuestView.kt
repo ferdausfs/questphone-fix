@@ -96,8 +96,11 @@ class DeepFocusQuestViewVM @Inject constructor(questRepository: QuestRepository,
     val focusDuration = MutableStateFlow(0L)
 
     var questKey = ""
-    val startTimeKey = KEY_START_TIME + questKey
-    val pausedElapsedKey = KEY_PAUSED_ELAPSED + questKey
+    // Computed properties, not vals: questKey is assigned later in setDeepFocus(),
+    // so a val captured "" here made onDeepFocusComplete delete the WRONG prefs
+    // keys and stale start times resumed as "expired" timers next session.
+    val startTimeKey: String get() = KEY_START_TIME + questKey
+    val pausedElapsedKey: String get() = KEY_PAUSED_ELAPSED + questKey
     val prefs = application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
 
@@ -110,6 +113,13 @@ class DeepFocusQuestViewVM @Inject constructor(questRepository: QuestRepository,
             isTimerActive.value = true
         }
         focusDuration.value = deepFocus.nextFocusDurationInMillis
+        // Guard against 0/negative durations (template default "0", bad imports):
+        // progress = elapsedTime/0 = Infinity → coerceIn → 1f, so the quest
+        // "completed" the instant it started. Enforce a 1-minute minimum.
+        if (focusDuration.value <= 0L) {
+            focusDuration.value = 60_000L
+            deepFocus.nextFocusDurationInMillis = 60_000L
+        }
         Log.d("Deep Focus Length",focusDuration.value.toString())
     }
 
@@ -132,6 +142,8 @@ class DeepFocusQuestViewVM @Inject constructor(questRepository: QuestRepository,
         }
 
         val intent = Intent(INTENT_ACTION_START_DEEP_FOCUS)
+        // Explicit package: NOT_EXPORTED receivers on Android 14+ drop implicit intents.
+        intent.setPackage(application.packageName)
         intent.putStringArrayListExtra("exception", deepFocus.unrestrictedApps.toCollection(ArrayList()))
         intent.putExtra("duration", deepFocus.nextFocusDurationInMillis)
         application.sendBroadcast(intent)

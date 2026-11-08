@@ -55,7 +55,10 @@ object LocalDateSerializer : KSerializer<LocalDate> {
     }
 
     override fun deserialize(decoder: Decoder): LocalDate {
-        return LocalDate.parse(decoder.decodeString())
+        // Tolerate malformed/corrupt stored dates instead of crashing the caller
+        // (kotlinx LocalDate has a sane "0001-01-01" representation).
+        return runCatching { LocalDate.parse(decoder.decodeString()) }
+            .getOrDefault(LocalDate(1, 1, 1))
     }
 }
 
@@ -64,7 +67,9 @@ object StatsConverter {
     fun fromDate(date: LocalDate): String = date.toString()
 
     @TypeConverter
-    fun toDate(dateString: String): LocalDate = LocalDate.parse(dateString)
+    fun toDate(dateString: String): LocalDate =
+        // Runs on every row of every stats query — must be total.
+        runCatching { LocalDate.parse(dateString) }.getOrDefault(LocalDate(1, 1, 1))
 }
 
 

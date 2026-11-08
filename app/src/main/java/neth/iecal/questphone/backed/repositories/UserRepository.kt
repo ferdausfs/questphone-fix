@@ -9,6 +9,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import neth.iecal.questphone.backed.triggerProfileSync
 import neth.iecal.questphone.core.Supabase
@@ -20,9 +24,6 @@ import nethical.questphone.data.game.InventoryItem
 import nethical.questphone.data.game.StreakFreezerReturn
 import nethical.questphone.data.json
 import nethical.questphone.data.xpToLevelUp
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.ExperimentalTime
@@ -47,6 +48,7 @@ class UserRepository @Inject constructor(
     
     // the below variables act as a trigger for launching the reward dialog declared in the MainActivity from a
     // different SubScreen.
+    @Synchronized
     fun getUserId(): String {
         // Local-only build: no accounts exist, so a stable local identifier is
         // generated once and kept on-device instead of a Supabase user id.
@@ -63,7 +65,7 @@ class UserRepository @Inject constructor(
         if(id!= null) return id
         id = Supabase.supabase.auth.currentUserOrNull()?.id ?: return ""
         sp.edit { putString("key",id) }
-        return Supabase.supabase.auth.currentUserOrNull()!!.id
+        return Supabase.supabase.auth.currentUserOrNull()?.id ?: id
     }
 
     fun addXp(xp: Int) {
@@ -79,19 +81,20 @@ class UserRepository @Inject constructor(
 
     fun removeInactiveBooster() {
         userInfo.active_boosts.entries.removeIf { isTimeOver(it.value) }
-        activeBoostsState.value = userInfo.active_boosts
+        activeBoostsState.value = HashMap(userInfo.active_boosts)
         saveUserInfo()
     }
 
     fun activateBoost(item: InventoryItem, hoursToAdd: Long, minsToAdd: Long){
-        userInfo.active_boosts.put(InventoryItem.XP_BOOSTER, getFullTimeAfter(hoursToAdd, minsToAdd))
+        // Use the requested item (previously XP_BOOSTER was hardcoded).
+        userInfo.active_boosts.put(item, getFullTimeAfter(hoursToAdd, minsToAdd))
         saveUserInfo()
         //update state
-        activeBoostsState.value = userInfo.active_boosts
+        activeBoostsState.value = HashMap(userInfo.active_boosts)
     }
     fun isBoosterActive(reward: InventoryItem): Boolean {
         if (userInfo.active_boosts.contains(reward)) {
-            val isActive = !isTimeOver(userInfo.active_boosts.getOrDefault(reward, "0069-69-69-69-69"))
+            val isActive = !isTimeOver(userInfo.active_boosts.getOrDefault(reward, ""))
             if (!isActive) removeInactiveBooster()
             return isActive
         }
@@ -112,8 +115,33 @@ class UserRepository @Inject constructor(
             triggerProfileSync(context)
         }
         context.getSharedPreferences("user_info", Context.MODE_PRIVATE)
-            .edit { putString("user_info", json.encodeToString(userInfo)) }
+            .edit { putString("user_info", json.encodeToString(snapshotUserInfo())) }
         coinsState.value = userInfo.coins
+    }
+
+    /**
+     * Deep copy of the current profile. Background threads (backup worker, JS
+     * bridge) must encode THIS, never the live object — the live HashMaps are
+     * concurrently mutated on the main thread and iterating them elsewhere
+     * throws ConcurrentModificationException.
+     */
+    fun snapshotUserInfo(): UserInfo {
+        return userInfo.copy(
+            inventory = HashMap(userInfo.inventory),
+            active_boosts = HashMap(userInfo.active_boosts),
+            blockedAndroidPackages = userInfo.blockedAndroidPackages?.toSet(),
+            unlockedAndroidPackages = userInfo.unlockedAndroidPackages?.let { HashMap(it) },
+            fcm_tokens = userInfo.fcm_tokens.toList(),
+            streak = userInfo.streak.copy(
+                streakFailureHistory = HashMap(userInfo.streak.streakFailureHistory)
+            ),
+            achievements = userInfo.achievements.toList(),
+            customization_info = userInfo.customization_info.copy(
+                themeData = HashMap(userInfo.customization_info.themeData),
+                purchasedThemes = HashSet(userInfo.customization_info.purchasedThemes),
+                purchasedWidgets = HashSet(userInfo.customization_info.purchasedWidgets)
+            )
+        )
     }
 
     fun getInventoryItemCount(item: InventoryItem): Int {
@@ -130,10 +158,13 @@ class UserRepository @Inject constructor(
         saveUserInfo()
     }
     fun deductFromInventory(item: InventoryItem, count: Int = 1) {
-        if (getInventoryItemCount(item) > 0) {
-            userInfo.inventory[item] = getInventoryItemCount(item) - count
-            if (getInventoryItemCount(item) == 0) {
+        val available = getInventoryItemCount(item)
+        if (available > 0) {
+            val newCount = (available - count.coerceAtLeast(0))
+            if (newCount <= 0) {
                 userInfo.inventory.remove(item)
+            } else {
+                userInfo.inventory[item] = newCount
             }
             saveUserInfo()
         }
@@ -146,8 +177,8 @@ class UserRepository @Inject constructor(
     }
 
     fun useCoins(number: Int) {
-        userInfo.coins -= number
-        coinsState.value -= number
+        userInfo.coins = (userInfo.coins - number).coerceAtLeast(0)
+        coinsState.value = userInfo.coins
         saveUserInfo()
     }
 
@@ -163,7 +194,10 @@ class UserRepository @Inject constructor(
     fun checkIfStreakFailed(): Int? {
         val today = LocalDate.now()
         val streakData = userInfo.streak
-        val lastCompleted = LocalDate.parse(streakData.lastCompletedDate)
+        // lastCompletedDate may be garbage (restored backup / old locale-digit bug);
+        // treat unparseable dates as "never completed" instead of crashing.
+        val lastCompleted = runCatching { LocalDate.parse(streakData.lastCompletedDate) }
+            .getOrDefault(LocalDate.of(1, 1, 1))
         val daysSince = ChronoUnit.DAYS.between(lastCompleted, today)
         Log.d("streak day since", daysSince.toString())
 
@@ -177,7 +211,7 @@ class UserRepository @Inject constructor(
 
 
     fun tryUsingStreakFreezers(daysSince:Int): StreakFreezerReturn {
-        val requiredFreezers = (daysSince -1).toInt()
+        val requiredFreezers = (daysSince -1).coerceAtLeast(0)
         val today = LocalDate.now()
         if (getInventoryItemCount(InventoryItem.STREAK_FREEZER) >= requiredFreezers) {
             deductFromInventory(InventoryItem.STREAK_FREEZER, requiredFreezers)
@@ -207,11 +241,14 @@ class UserRepository @Inject constructor(
     }
     fun continueStreak(): Boolean {
         val today = LocalDate.now()
-        val lastCompleted = LocalDate.parse(userInfo.streak.lastCompletedDate)
+        // Unparseable/missing date is treated as "never completed" (year 1) so the
+        // streak simply continues instead of crashing with DateTimeParseException.
+        val lastCompleted = runCatching { LocalDate.parse(userInfo.streak.lastCompletedDate) }
+            .getOrDefault(LocalDate.of(1, 1, 1))
         val daysSince = ChronoUnit.DAYS.between(lastCompleted, today)
 
         Log.d("daysSince",daysSince.toString())
-        if(daysSince!=0L){
+        if(daysSince!=0L && daysSince > 0){
             userInfo.streak.currentStreak += 1
             userInfo.streak.longestStreak = maxOf(userInfo.streak.currentStreak, userInfo.streak.longestStreak)
             userInfo.streak.lastCompletedDate = getCurrentDate()
@@ -254,7 +291,51 @@ class UserRepository @Inject constructor(
         // path (they are all gated on !isAnonymous) and keeps all data on-device.
         info.isAnonymous = true
         info.needsSync = false
+        sanitizeUserInfo(info)
         return info
+    }
+
+    companion object {
+
+        /**
+         * Repairs every free-form date field that can crash downstream parsers
+         * (LocalDate.parse / LocalDateTime.parse). Needed because older app
+         * versions wrote locale-localized dates (e.g. Bengali digits
+         * "২০২৬-১১-০৮") and backups/foreign data can contain anything.
+         * @param resetInvalidStreak also reset currentStreak when the date is
+         *   unparseable (used for restored backups — a corrupt date means the
+         *   streak state is meaningless)
+         */
+        fun sanitizeUserInfo(info: UserInfo, resetInvalidStreak: Boolean = false) {
+            val isoDate = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            runCatching { LocalDate.parse(info.streak.lastCompletedDate) }.onFailure {
+                if (resetInvalidStreak) {
+                    info.streak.currentStreak = 0
+                }
+                info.streak.lastCompletedDate = "0001-01-01"
+            }
+
+            // streakFailureHistory keys must be ISO dates
+            val badHistoryKeys = info.streak.streakFailureHistory.keys.filter { key ->
+                runCatching { LocalDate.parse(key, isoDate) }.isFailure
+            }
+            if (badHistoryKeys.isNotEmpty()) {
+                info.streak.streakFailureHistory =
+                    info.streak.streakFailureHistory.filterKeys { it !in badHistoryKeys }
+            }
+
+            // boost timestamps use the app-internal "yyyy-dd-MM-HH-mm" pattern;
+            // unparseable entries would be treated as "never expires" — drop them.
+            val boostFormatter = DateTimeFormatter.ofPattern("yyyy-dd-MM-HH-mm")
+            val badBoosts = info.active_boosts.entries.filter { (_, v) ->
+                runCatching { LocalDateTime.parse(v, boostFormatter) }.isFailure
+            }.map { it.key }
+            badBoosts.forEach { info.active_boosts.remove(it) }
+
+            runCatching { info.created_on }.onFailure {
+                info.created_on = java.time.Clock.systemDefaultZone().instant()
+            }
+        }
     }
 
     /**
@@ -262,12 +343,13 @@ class UserRepository @Inject constructor(
      * refreshes every exposed state flow.
      */
     fun replaceUserInfo(info: UserInfo) {
+        info.isAnonymous = true
+        info.needsSync = false
+        sanitizeUserInfo(info, resetInvalidStreak = true)
         userInfo = info
-        userInfo.isAnonymous = true
-        userInfo.needsSync = false
         coinsState.value = userInfo.coins
         currentStreakState.value = userInfo.streak.currentStreak
-        activeBoostsState.value = userInfo.active_boosts
+        activeBoostsState.value = HashMap(userInfo.active_boosts)
         saveUserInfo(false)
     }
 

@@ -17,14 +17,19 @@ class StreakReminderReceiver : HiltBroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
 
-        if (userRepository.userInfo.streak.currentStreak != 0) {
-            val daysSince = userRepository.checkIfStreakFailed()
-            if(daysSince!=null){
-                handleStreakFreezers(userRepository.tryUsingStreakFreezers(daysSince))
+        // A receiver exception kills the whole process. This fires every morning
+        // at 9 AM — a single bad streak date must never crash the app.
+        try {
+            if (userRepository.userInfo.streak.currentStreak != 0) {
+                val daysSince = userRepository.checkIfStreakFailed()
+                if(daysSince!=null){
+                    handleStreakFreezers(userRepository.tryUsingStreakFreezers(daysSince))
+                }
             }
-
+            generateStreakReminder(userRepository, context)
+        } catch (e: Exception) {
+            android.util.Log.e("StreakReminderReceiver", "Streak reminder failed", e)
         }
-        generateStreakReminder(userRepository, context)
 
         // re-schedule for next day
         scheduleDailyNotification(context, 9, 0) // set your fixed time

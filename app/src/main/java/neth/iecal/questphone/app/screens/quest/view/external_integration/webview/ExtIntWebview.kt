@@ -194,7 +194,10 @@ fun ExtIntWebview(
                 }
             }
 
-            val json = JSONObject(commonQuestInfo.quest_json)
+            // quest_json defaults to "" and can be any garbage from imports or
+            // templates — a JSONException here crashed the whole quest view.
+            val json = runCatching { JSONObject(commonQuestInfo.quest_json) }
+                .getOrDefault(JSONObject())
             if (json.has("webviewUrl")) {
                 val url = json.getString("webviewUrl")
                 // Only https:// can be loaded. The quest_json may come from template

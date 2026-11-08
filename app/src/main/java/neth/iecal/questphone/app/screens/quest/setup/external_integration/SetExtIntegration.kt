@@ -128,8 +128,12 @@ class ExternalIntegrationQuestVM @Inject constructor(
     private fun loadSavedToken() {
         val saved = prefs.getString("token", null)
         if (saved != null) {
-            val tToken = json.decodeFromString<Token>(saved)
-            if (System.currentTimeMillis() - tToken.createdAt <= ONEHOURMS) {
+            // A corrupt/stale-schema token previously crashed the VM init —
+            // clear it and continue without a token instead.
+            val tToken = runCatching { json.decodeFromString<Token>(saved) }.getOrNull()
+            if (tToken == null) {
+                prefs.edit(commit = true) { remove("token") }
+            } else if (System.currentTimeMillis() - tToken.createdAt <= ONEHOURMS) {
                 token.value = tToken
             } else {
                 prefs.edit(commit = true) { remove("token") }

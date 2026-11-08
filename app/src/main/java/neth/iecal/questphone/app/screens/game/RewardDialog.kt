@@ -35,6 +35,14 @@ object RewardDialogInfo{
     var currentDialog by mutableStateOf<DialogState>(DialogState.NONE)
     var coinsEarned by mutableIntStateOf(0)
     var streakFreezerReturn : StreakFreezerReturn? = null
+
+    /**
+     * Reward dialogs grant XP/coins inside LaunchedEffect(currentDialog).
+     * After an Activity recreation (rotation, dark-mode toggle) the same dialog
+     * state re-enters composition and the effect re-ran → DOUBLE REWARDS.
+     * This process-wide marker records which dialog already granted rewards.
+     */
+    var rewardsGrantedFor: DialogState? = null
 }
 
 /**
@@ -56,6 +64,12 @@ fun RewardDialogMaker(userRepository: UserRepository) {
         return oldLevel != userRepository.userInfo.level
     }
     LaunchedEffect(currentDialog) {
+        // Consume-once guard: never grant the same dialog's rewards twice
+        // (protects against Activity recreation re-running this effect).
+        if (currentDialog != DialogState.NONE && RewardDialogInfo.rewardsGrantedFor == currentDialog) {
+            return@LaunchedEffect
+        }
+        RewardDialogInfo.rewardsGrantedFor = currentDialog
         when (currentDialog) {
             DialogState.QUEST_COMPLETED -> {
                 var xp = xpToRewardForQuest(userRepository.userInfo.level)
@@ -73,11 +87,14 @@ fun RewardDialogMaker(userRepository: UserRepository) {
             }
 
             DialogState.STREAK_FREEZER_USED -> {
-                xpEarned.intValue = (streakFreezerReturn!!.lastStreak until userRepository.currentStreakState.value).sumOf { day ->
-                    val xp = xpFromStreak(day)
-                    userRepository.addXp(xp)
-                    xp
-                }
+                val freezerReturn = streakFreezerReturn
+                xpEarned.intValue = if (freezerReturn != null) {
+                    (freezerReturn.lastStreak until userRepository.currentStreakState.value).sumOf { day ->
+                        val xp = xpFromStreak(day)
+                        userRepository.addXp(xp)
+                        xp
+                    }
+                } else 0
             }
             DialogState.STREAK_UP -> {
                 xpEarned.intValue = xpFromStreak(userRepository.currentStreakState.value)
@@ -138,15 +155,20 @@ fun RewardDialogMaker(userRepository: UserRepository) {
             }
         }
         DialogState.STREAK_FREEZER_USED -> {
-            StreakFreezersUsedDialog(streakFreezerReturn!!.streakFreezersUsed!!,userRepository.userInfo.streak,xpEarned.intValue) {
+            StreakFreezersUsedDialog(streakFreezerReturn?.streakFreezersUsed ?: 0,userRepository.userInfo.streak,xpEarned.intValue) {
                 RewardDialogInfo.currentDialog = DialogState.NONE
             }
         }
 
         DialogState.STREAK_FAILED -> {
-            StreakFailedDialog(
-                streakFreezerReturn = streakFreezerReturn!!
-            ) {
+            val failedReturn = streakFreezerReturn
+            if (failedReturn != null) {
+                StreakFailedDialog(
+                    streakFreezerReturn = failedReturn
+                ) {
+                    RewardDialogInfo.currentDialog = DialogState.NONE
+                }
+            } else {
                 RewardDialogInfo.currentDialog = DialogState.NONE
             }
         }

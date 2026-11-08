@@ -190,6 +190,9 @@ class AppListViewModel @Inject constructor(
         val pkg = _selectedPackage.value
         val intent = Intent().apply {
             action = INTENT_ACTION_UNLOCK_APP
+            // Explicit package: NOT_EXPORTED receivers on Android 14+ drop
+            // implicit intents — without this, coin-unlock silently did nothing.
+            setPackage(context.packageName)
             putExtra("selected_time", cooldownTime)
             putExtra("package_name", pkg)
         }

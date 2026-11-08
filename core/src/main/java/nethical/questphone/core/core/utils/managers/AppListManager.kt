@@ -26,7 +26,8 @@ fun getCachedApps(context: Context): List<AppInfo> {
     val sharedPreferences = context.getSharedPreferences("app_cache", Context.MODE_PRIVATE)
     val json = sharedPreferences.getString("apps", null)
     return if (json != null) {
-        Json.decodeFromString(json)
+        // Corrupt cache must degrade to "no cache", not crash the launcher VM init.
+        runCatching { Json.decodeFromString<List<AppInfo>>(json) }.getOrDefault(emptyList())
     } else {
         emptyList()
     }

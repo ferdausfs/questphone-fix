@@ -26,11 +26,14 @@ import kotlin.time.toKotlinInstant
 
 
 /**
- * format: yyyy-MM-dd
+ * format: yyyy-MM-dd (always ISO-8601 with ASCII digits).
+ *
+ * Never use SimpleDateFormat(Locale.getDefault()) here: locales such as Bengali,
+ * Arabic or Thai produce localized digits (e.g. "২০২৬-১১-০৮") and non-Gregorian
+ * calendars, which then crash LocalDate.parse() everywhere downstream.
  */
 fun getCurrentDate(): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    return sdf.format(Date())
+    return java.time.LocalDate.now().toString() // yyyy-MM-dd, locale-independent
 }
 
 
@@ -43,21 +46,22 @@ fun getCurrentTime24Hr(): String {
 
 
 /**
- * format: yyyy-MM-dd
+ * format: yyyy-MM-dd (always ISO-8601 with ASCII digits, see getCurrentDate)
  */
 fun getPreviousDay(): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val calendar = Calendar.getInstance()
-    calendar.add(Calendar.DATE, -1) // Subtract 1 day
-    return sdf.format(calendar.time)
+    return java.time.LocalDate.now().minusDays(1).toString()
 }
 
 /**
  * format: yyyy-MM-dd
  */
 fun getDateFromString(dateStr: String): Date {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    return sdf.parse(dateStr) ?: Date()
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    return try {
+        sdf.parse(dateStr) ?: Date()
+    } catch (e: Exception) {
+        Date()
+    }
 }
 
 fun getDayName(date: Date): String {
@@ -192,25 +196,42 @@ fun getAllDatesBetween(startDate: Date, endDate: Date): List<Date> {
 }
 
 
+/**
+ * Number of days between [dateString] and today (inclusive) whose weekday is in
+ * [allowedDays]. Parse failures and the "0001-01-01" sentinel (never completed)
+ * are handled gracefully instead of throwing or looping over ~740k days.
+ */
 @OptIn(ExperimentalTime::class)
 fun daysSince(
     dateString: String,
     allowedDays: Set<java.time.DayOfWeek>
 ): Int {
-    val inputDate = LocalDate.parse(dateString)
-    val today = kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
+    if (allowedDays.isEmpty()) return 0
 
-    val start = minOf(inputDate, today)
-    val end = maxOf(inputDate, today)
+    val inputDate = try {
+        java.time.LocalDate.parse(dateString)
+    } catch (e: Exception) {
+        return 0
+    }
+    // Sentinel "0001-01-01" means "streak never completed" — don't iterate 700k+ days.
+    if (inputDate.year < 1900) return allowedDays.size
 
-    var count = 0
-    var current = start
+    val start = minOf(inputDate, java.time.LocalDate.now())
+    val end = maxOf(inputDate, java.time.LocalDate.now())
 
-    while (current <= end) {
-        if (current.dayOfWeek.toJavaDayOfWeek() in allowedDays) {
+    // Count allowed weekdays in [start, end] without iterating every day:
+    // full 7-day cycles contain every weekday exactly once, only the tail
+    // (totalDays % 7 days, at the end of the range) needs a small loop.
+    val totalDays = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1
+    val fullWeeks = totalDays / 7
+    var count = (fullWeeks * allowedDays.size).toInt()
+
+    var current = end.minusDays((totalDays % 7) - 1)
+    while (!current.isAfter(end)) {
+        if (current.dayOfWeek in allowedDays) {
             count++
         }
-        current = current.plus(1, DateTimeUnit.DAY)
+        current = current.plusDays(1)
     }
 
     return count

@@ -54,8 +54,12 @@ class BonsaiTreeViewModel
 
     fun getSeed(streak: Int): Long {
         val bonsaiInfoJsonRaw = userRepository.userInfo.customization_info.themeData["Bonsai Tree"]
+        // themeData can come from a restored backup / old sync with a different
+        // schema — an unguarded decode here crashed composition on EVERY launch
+        // while the theme was equipped (startup crash loop).
         val bonsaiInfoJson = if (bonsaiInfoJsonRaw != null)
-            json.decodeFromString<BonsaiTreeInfo>(bonsaiInfoJsonRaw)
+            runCatching { json.decodeFromString<BonsaiTreeInfo>(bonsaiInfoJsonRaw) }
+                .getOrDefault(BonsaiTreeInfo())
         else {
             BonsaiTreeInfo()
         }

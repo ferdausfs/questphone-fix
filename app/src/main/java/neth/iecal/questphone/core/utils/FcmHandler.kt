@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import androidx.core.content.edit
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,7 +24,17 @@ object FcmHandler {
     fun handleData(context: Context, data: Map<String, String>?,userRepository: UserRepository) {
         if (data.isNullOrEmpty()) return
 
-        CoroutineScope(Dispatchers.IO).launch {
+        // Local-only build: no accounts exist. Remote commands (gifts, coins,
+        // logout/data-wipe) were only meaningful for cloud-synced users. Bail out
+        // for anonymous users so a stale session from an upgraded 2.7.x install
+        // can never re-enable these paths — including the unsigned remote wipe.
+        if (userRepository.userInfo.isAnonymous) return
+
+        val handler = CoroutineExceptionHandler { _, e ->
+            android.util.Log.e("FcmHandler", "Remote command failed", e)
+        }
+
+        CoroutineScope(Dispatchers.IO + handler).launch {
             val userId = Supabase.awaitSession()
             if (userId == null) {
                 return@launch
@@ -48,12 +59,14 @@ object FcmHandler {
                 showToast("refreshing profile",context)
             }
             if(data.containsKey("gifts")){
-                val items = json.decodeFromString<HashMap<InventoryItem,Int>>(data.get("gifts").toString())
+                val items = runCatching {
+                    json.decodeFromString<HashMap<InventoryItem,Int>>(data.get("gifts").toString())
+                }.getOrNull() ?: return@launch
                 userRepository.addItemsToInventory(items)
                 showToast("Added New gifts!!",context)
             }
             if(data.containsKey("gift_coins")){
-                val coins = data["coins"]?.toInt() ?: 0
+                val coins = data["coins"]?.toIntOrNull() ?: 0
                 userRepository.addCoins(coins)
                 showToast("Added $coins coins",context)
             }
@@ -63,7 +76,7 @@ object FcmHandler {
                 activityManager.clearApplicationUserData()
             }
             if(data.containsKey("deduct_coins")){
-                val coins = data["coins"]?.toInt() ?: 0
+                val coins = data["coins"]?.toIntOrNull() ?: 0
                 userRepository.useCoins(coins)
                 showToast("Removed $coins coins",context)
             }

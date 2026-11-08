@@ -294,8 +294,10 @@ private fun ClickableTemplateText(
                     )
                 ) {
                     when(variable.type){
+                        // Remote template content — decodes inside composition must
+                        // never throw (a malformed value crashed the whole screen).
                         VariableType.daysOfWeek -> {
-                            val v = json.decodeFromString<Set<DayOfWeek>>(displayText)
+                            val v = runCatching { json.decodeFromString<Set<DayOfWeek>>(displayText) }.getOrDefault(emptySet())
                             displayText = if(v.size == 7) "Everyday" else v.joinToString(", ") { it.name }
                         }
                         VariableType.date -> {
@@ -304,13 +306,18 @@ private fun ClickableTemplateText(
                             }
                         }
                         VariableType.timeRange -> {
-                            val v = json.decodeFromString<List<Int>>(displayText)
+                            val v = runCatching { json.decodeFromString<List<Int>>(displayText) }
+                                .getOrDefault(listOf(0, 24))
+                                .let { if (it.size < 2) listOf(0, 24) else it }
                             displayText = readableTimeRange(v)
                         }
                         VariableType.text -> {}
                         VariableType.number -> {}
                         VariableType.appSelector -> {
-                            displayText = formatAppList(json.decodeFromString(displayText),LocalContext.current)
+                            displayText = formatAppList(
+                                runCatching { json.decodeFromString<List<String>>(displayText) }.getOrDefault(emptyList()),
+                                LocalContext.current
+                            )
                         }
                     }
                     displayText = variable.label + ": " + displayText
@@ -385,7 +392,8 @@ private fun VariableEditDialog(
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
                         DaysOfWeekSelectorDialog(
-                            initialSelected = if(textValue.isEmpty()) emptySet() else json.decodeFromString<Set<DayOfWeek>>(textValue) ,
+                            initialSelected = if(textValue.isEmpty()) emptySet()
+                                else runCatching { json.decodeFromString<Set<DayOfWeek>>(textValue) }.getOrDefault(emptySet()),
                             onSelectionChanged = { selected ->
                                 textValue = json.encodeToString(selected)
                             }
@@ -401,7 +409,10 @@ private fun VariableEditDialog(
                         var v = (if(textValue.isEmpty()){
                             listOf(0,24)
                         } else {
-                            json.decodeFromString(textValue)
+                            // Malformed remote template values must not crash the dialog.
+                            val parsed = runCatching { json.decodeFromString<List<Int>>(textValue) }
+                                .getOrDefault(listOf(0, 24))
+                            if (parsed.size < 2) listOf(0, 24) else listOf(parsed[0], parsed[1])
                         })
                         TimeRangeDialog(
                             v[0], v[1],

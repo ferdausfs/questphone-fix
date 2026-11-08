@@ -65,7 +65,10 @@ class ExternalIntegrationQuestViewVM @Inject constructor (questRepository: Quest
     fun getUserData():String{
         // Strip FCM device tokens before handing profile data to webview content —
         // any loaded page could otherwise exfiltrate them.
-        return json.encodeToString(userRepository.userInfo.copy(fcm_tokens = emptyList()))
+        // snapshotUserInfo() deep-copies every collection: the JavaBridge thread
+        // must never iterate the live HashMaps (main thread mutates them
+        // concurrently → ConcurrentModificationException → process death).
+        return json.encodeToString(userRepository.snapshotUserInfo().copy(fcm_tokens = emptyList()))
     }
     suspend fun getQuestStats(onDone:(String)->Unit){
         val stats = statsRepository.getStatsByQuestId(commonQuestInfo.id).first()

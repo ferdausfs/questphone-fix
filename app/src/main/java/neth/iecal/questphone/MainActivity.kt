@@ -90,7 +90,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleNotificationIntent(intent)
-        val questId = intent.getStringExtra("quest_id")
+        // Only route straight into a quest when the notification carried a valid
+        // UUID. Previously an empty/garbage quest_id produced "view_quest/" which
+        // matches no destination → IllegalArgumentException crash on tap.
+        val questId = intent.getStringExtra("quest_id")?.trim().takeIf { it?.isNotEmpty() == true }
+        val questIdIsUuid = questId?.let { runCatching { java.util.UUID.fromString(it) }.isSuccess } ?: false
         enableEdgeToEdge()
         val data = getSharedPreferences("onboard", MODE_PRIVATE)
         val notificationScheduler = NotificationScheduler(applicationContext,questRepository)
@@ -188,7 +192,7 @@ class MainActivity : ComponentActivity() {
                     }
                     NavHost(
                         navController = navController,
-                        startDestination = if(questId!=null) "${RootRoute.ViewQuest.route}${questId}" else RootRoute.HomeScreen.route,
+                        startDestination = if(questId != null && questIdIsUuid) "${RootRoute.ViewQuest.route}${questId}" else RootRoute.HomeScreen.route,
                         popEnterTransition = { fadeIn(animationSpec = tween(700)) },
                         popExitTransition = { fadeOut(animationSpec = tween(700)) },
                     ) {
@@ -201,7 +205,9 @@ class MainActivity : ComponentActivity() {
                             arguments = listOf(navArgument("mode") { type = NavType.IntType })
                         ) { backstack ->
                             val mode = backstack.arguments?.getInt("mode")
-                            SelectApps(SelectAppsModes.entries[mode!!])
+                                ?.coerceIn(0, SelectAppsModes.entries.size - 1)
+                                ?: SelectAppsModes.ALLOW_ADD_AND_REMOVE.ordinal
+                            SelectApps(SelectAppsModes.entries[mode])
                         }
                         composable(RootRoute.HomeScreen.route) {
                             HomeScreen(navController,homeScreenViewModel)
@@ -234,8 +240,9 @@ class MainActivity : ComponentActivity() {
                             arguments = listOf(navArgument("id") { type = NavType.StringType })
                         ) { backStackEntry ->
                             val id = backStackEntry.arguments?.getString("id")
+                                ?.takeIf { it.isNotEmpty() } ?: return@composable
 
-                            ViewQuest(navController, questRepository,id!!)
+                            ViewQuest(navController, questRepository,id)
                         }
 
                         navigation(
@@ -264,8 +271,9 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("${RootRoute.QuestStats.route}{id}") { backStackEntry ->
                             val id = backStackEntry.arguments?.getString("id")
+                                ?.takeIf { it.isNotEmpty() } ?: return@composable
 
-                            BaseQuestStatsView(id!!, navController)
+                            BaseQuestStatsView(id, navController)
                         }
                         composable(RootRoute.SelectTemplates.route) {
                             SelectFromTemplates(navController,templatesViewModel)
@@ -279,8 +287,11 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("${RootRoute.IntegrationDocs.route}{name}"){ backStackEntry ->
                             val id = backStackEntry.arguments?.getString("name")
-                            val url = IntegrationId.valueOf(id.toString()).docLink
-                            DocumentViewerScreen(url)
+                            // Stale/malformed route args must not crash with
+                            // IllegalArgumentException from valueOf.
+                            val integration = IntegrationId.entries.firstOrNull { it.name == id }
+                                ?: IntegrationId.DEEP_FOCUS
+                            DocumentViewerScreen(integration.docLink)
                         }
                         composable("${RootRoute.DocViewer.route}{url}"){ backStackEntry ->
                             val url = backStackEntry.arguments?.getString("url")

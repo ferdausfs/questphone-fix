@@ -11,6 +11,7 @@ import android.media.AudioAttributes
 import android.os.Build
 import android.util.Log
 import androidx.core.net.toUri
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -216,29 +217,50 @@ class NotificationScheduler(private val context: Context,val questRepository: Qu
         createNotificationChannel()
 
         val reminderDao = ReminderDatabaseProvider.getInstance(context).reminderDao()
+        val repo = questRepository ?: return
 
-        CoroutineScope(Dispatchers.Default).launch {
-            val persistedReminders = reminderDao.getAllUpcoming()
+        // This coroutine is fire-and-forget (MainActivity, BootReceiver, restore).
+        // Without an exception handler any failure — one bad Room row, one corrupt
+        // quest — would crash the whole process (boot crash loops included).
+        val handler = CoroutineExceptionHandler { _, e ->
+            Log.e("NotificationScheduler", "Reminder reload failed", e)
+        }
+
+        CoroutineScope(Dispatchers.Default + handler).launch {
+            val persistedReminders = try {
+                reminderDao.getAllUpcoming()
+            } catch (e: Exception) {
+                Log.e("NotificationScheduler", "Could not read reminders", e)
+                return@launch
+            }
             val persistedQuestIds = persistedReminders.map { it.quest_id }.toSet()
 
-            val allQuests = questRepository!!.getAllQuests().first()
+            val allQuests = repo.getAllQuests().first()
             val allQuestIds = allQuests.map { it.id }.toSet()
 
-            // Generate reminders for quests that have no reminder yet
+            // Generate reminders for quests that have no reminder yet — one broken
+            // quest must not abort the whole loop.
             allQuestIds.forEach { questId ->
                 if (questId !in persistedQuestIds) {
-                    questRepository.getQuestById(questId)
-                        ?.let { generateQuestReminder(context, it) }
+                    try {
+                        repo.getQuestById(questId)?.let { generateQuestReminder(context, it) }
+                    } catch (e: Exception) {
+                        Log.e("NotificationScheduler", "Reminder generation failed for quest $questId", e)
+                    }
                 }
             }
 
             // Reschedule existing reminders
             persistedReminders.forEach { reminder ->
-                if (reminder.timeMillis < System.currentTimeMillis()) {
-                    questRepository.getQuestById(reminder.quest_id)
-                        ?.let { generateQuestReminder(context, it) }
-                } else {
-                    scheduleReminder(reminder)
+                try {
+                    if (reminder.timeMillis < System.currentTimeMillis()) {
+                        repo.getQuestById(reminder.quest_id)
+                            ?.let { generateQuestReminder(context, it) }
+                    } else {
+                        scheduleReminder(reminder)
+                    }
+                } catch (e: Exception) {
+                    Log.e("NotificationScheduler", "Rescheduling failed for reminder ${reminder.quest_id}", e)
                 }
             }
 

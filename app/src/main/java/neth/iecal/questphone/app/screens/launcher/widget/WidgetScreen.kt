@@ -222,7 +222,13 @@ fun ProvideAppWidgetHost(content: @Composable () -> Unit) {
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            widgetHost.startListening()
+            try {
+                // Throws SecurityException on devices where widget hosting is not
+                // permitted (e.g. app is not the default launcher / OEM restriction).
+                widgetHost.startListening()
+            } catch (e: Exception) {
+                Log.e("WidgetHost", "Error starting widget host", e)
+            }
             try {
                 awaitCancellation()
             } finally {
